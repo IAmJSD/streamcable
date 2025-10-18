@@ -32,8 +32,8 @@ export async function deserialize<S extends Schema<any>>(
     const payloadHasSchema = await readCtx.readByte();
     if (payloadHasSchema === 1) {
         // Use reflection to read the schema.
-        const { reflectToSchema } = await import("./reflection");
-        schema = await reflectToSchema(readCtx) as S;
+        const { reflectByteReprToSchema } = await import("./reflection");
+        schema = await reflectByteReprToSchema(readCtx) as S;
     }
 
     let usages = 0;

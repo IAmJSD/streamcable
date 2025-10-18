@@ -379,8 +379,8 @@ export function promise<T>(inner: Schema<T>, message?: string) {
 
                         if (flag === 0) {
                             // failure
-                            const { reflectToSchema } = await import("./reflection");
-                            const errorSchema = await reflectToSchema(streamCtx);
+                            const { reflectByteReprToSchema } = await import("./reflection");
+                            const errorSchema = await reflectByteReprToSchema(streamCtx);
                             const errorData = await errorSchema.readFromContext(streamCtx, hijackReadContext);
                             reject(new SerializableError(errorSchema, errorData[0]));
                             return;

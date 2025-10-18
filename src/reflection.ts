@@ -3,17 +3,17 @@ import { dataType, readRollingUintNoAlloc } from "./utils";
 
 const td = new TextDecoder();
 
-export async function reflectToSchema(ctx: ReadContext): Promise<Schema<any>> {
+export async function reflectByteReprToSchema(ctx: ReadContext): Promise<Schema<any>> {
     const typeByte = await ctx.readByte();
     switch (typeByte) {
         case dataType.array:
-            return array(await reflectToSchema(ctx));
+            return array(await reflectByteReprToSchema(ctx));
         case dataType.boolean:
             return boolean();
         case dataType.bytes:
             return uint8array();
         case dataType.iterator:
-            return iterator(await reflectToSchema(ctx));
+            return iterator(await reflectByteReprToSchema(ctx));
         case dataType.object: {
             const numFields = await readRollingUintNoAlloc(ctx);
             const fields: Record<string, Schema<any>> = {};
@@ -21,12 +21,12 @@ export async function reflectToSchema(ctx: ReadContext): Promise<Schema<any>> {
                 const fieldNameLength = await readRollingUintNoAlloc(ctx);
                 const fieldNameBytes = await ctx.readBytes(fieldNameLength);
                 const fieldName = td.decode(fieldNameBytes);
-                fields[fieldName] = await reflectToSchema(ctx);
+                fields[fieldName] = await reflectByteReprToSchema(ctx);
             }
             return object(fields);
         }
         case dataType.promise:
-            return promise(await reflectToSchema(ctx));
+            return promise(await reflectByteReprToSchema(ctx));
         case dataType.string:
             return string();
         default:
