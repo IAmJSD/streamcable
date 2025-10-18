@@ -1,3 +1,5 @@
+import { dataType, readRollingUintNoAlloc } from "./utils";
+
 export type WriteContext = {
     buf: Uint8Array;
     pos: number;
@@ -118,47 +120,6 @@ function writeRollingUintNoAlloc(data: number, u8a: Uint8Array, pos: number) {
     return pos + 9;
 }
 
-const dataType = {
-    array: 0x01,
-    object: 0x02,
-    string: 0x03,
-    bytes: 0x04,
-    promise: 0x05,
-    iterator: 0x06,
-    boolean: 0x07,
-};
-
-async function readRollingUintNoAlloc(ctx: ReadContext): Promise<number> {
-    const firstByte = await ctx.readByte();
-    if (firstByte < 0xfd) {
-        return firstByte;
-    }
-    if (firstByte === 0xfd) {
-        const bytes = await ctx.readBytes(2);
-        return bytes[0] | (bytes[1] << 8);
-    }
-    if (firstByte === 0xfe) {
-        const bytes = await ctx.readBytes(4);
-        return (
-            bytes[0] |
-            (bytes[1] << 8) |
-            (bytes[2] << 16) |
-            (bytes[3] << 24)
-        ) >>> 0;
-    }
-    const bytes = await ctx.readBytes(8);
-    return (
-        (bytes[0] +
-            (bytes[1] << 8) +
-            (bytes[2] << 16) +
-            (bytes[3] << 24)) >>> 0 +
-        (bytes[4] * 2 ** 32) +
-        (bytes[5] * 2 ** 40) +
-        (bytes[6] * 2 ** 48) +
-        (bytes[7] * 2 ** 56)
-    );
-}
-
 export function array<T>(elements: Schema<T>, message?: string) {
     if (!message) message = "Data must be an array";
 
@@ -204,7 +165,7 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
     if (!message) message = "Data must be an object";
 
     const keys = Object.keys(schemas).sort((a, b) => a.localeCompare(b));
-    let schemaLen = 1; // 1 byte for dataType
+    let schemaLen = 1 + getRollingUintSize(keys.length); // 1 byte for dataType, plus key count
     for (const key of keys) {
         schemaLen += getRollingUintSize(key.length) + key.length;
     }
@@ -216,7 +177,7 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
 
     const schema = new Uint8Array(schemaLen);
     schema[0] = dataType.object;
-    let pos = 1;
+    let pos = writeRollingUintNoAlloc(keys.length, schema, 1);
     for (let i = 0; i < keys.length; i++) {
         // Write key
         const key = keys[i];
