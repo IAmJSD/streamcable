@@ -1,5 +1,6 @@
 import { OutOfDataError } from "./ReadContext";
 import { dataType, readRollingUintNoAlloc } from "./utils";
+import FlatPromiseStream from "./FlatPromiseStream";
 
 export type WriteContext = {
     buf: Uint8Array;
@@ -408,6 +409,8 @@ export function promise<T>(inner: Schema<T>, message?: string) {
     );
 }
 
+const done_ = Symbol("done");
+
 export function iterator<T>(elements: Schema<T>, message?: string) {
     if (!message) message = "Data must be an iterator";
 
@@ -439,7 +442,6 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                         writer(buf);
                     }
                     const buf = new Uint8Array(1);
-                    buf[0] = 0; // end of iterator
                     writer(buf);
                     writer(null);
                 } catch (err) {
@@ -447,7 +449,7 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                         // Get the size of the serialized error data
                         const size = err.schema.calculateSize(err.data);
                         const buf = new Uint8Array(1 + err.schema.schema.length + size);
-                        buf[0] = 0;
+                        buf[0] = 2; // error flag
                         buf.set(err.schema.schema, 1);
                         const writeCtx: WriteContext = {
                             buf,
@@ -469,7 +471,60 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
             const idLow = await ctx.readByte();
             const id = (idHigh << 8) | idLow;
 
-            throw new Error("Not implemented yet");
+            const promiseStream = new FlatPromiseStream<T | typeof done_>();
+            let cleanup: (slurp: boolean) => void;
+            cleanup = hijackReadContext(id, async (streamCtx) => {
+                try {
+                    const flag = await streamCtx.readByte();
+                    if (flag === 1) {
+                        // continuation
+                        const value = await elements.readFromContext(streamCtx, hijackReadContext);
+                        promiseStream.resolve(value[0]);
+                        return;
+                    }
+
+                    if (flag === 0) {
+                        // end of iterator
+                        promiseStream.resolve(done_);
+                        cleanup(false);
+                        return;
+                    }
+
+                    if (flag === 2) {
+                        // error
+                        const { reflectByteReprToSchema } = await import("./reflection");
+                        const errorSchema = await reflectByteReprToSchema(streamCtx);
+                        const errorData = await errorSchema.readFromContext(streamCtx, hijackReadContext);
+                        promiseStream.reject(new SerializableError(errorSchema, errorData[0]));
+                        cleanup(false);
+                        return;
+                    }
+
+                    throw new Error("internal: Invalid iterator flag");
+                } catch (err) {
+                    promiseStream.reject(err);
+                    cleanup(false);
+                }
+            }, () => {
+                promiseStream.reject(new OutOfDataError());
+            });
+
+            const finalizer = new FinalizationRegistry(() => {
+                cleanup(true);
+            });
+            const asyncIterable: AsyncIterable<T> = {
+                async *[Symbol.asyncIterator]() {
+                    for (;;) {
+                        const value = await promiseStream;
+                        if (value === done_) {
+                            return;
+                        }
+                        yield value as T;
+                    }
+                },
+            };
+            finalizer.register(asyncIterable, id);
+            return [asyncIterable] as [Iterable<T> | AsyncIterable<T>];
         },
         schema,
     );
