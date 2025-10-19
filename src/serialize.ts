@@ -253,4 +253,9 @@ export async function serialize<S extends Schema<any>>(
 
     // Wait for all streams to close.
     await wg.wait();
+
+    // Close the connection.
+    if (socketOpen) {
+        writable.end();
+    }
 }

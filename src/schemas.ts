@@ -775,3 +775,34 @@ export function union<
         schema,
     );
 }
+
+export function date(message?: string) {
+    if (!message) message = "Data must be a Date";
+
+    return base<Date>(
+        "date",
+        (data) => {
+            if (!(data instanceof Date)) throw new ValidationError(message);
+            const timeStr = data.toISOString();
+            const len = getEncodedLenNoAlloc(timeStr);
+            return [
+                getRollingUintSize(len) + len,
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                    te.encodeInto(
+                        timeStr,
+                        ctx.buf.subarray(ctx.pos, ctx.pos + len),
+                    );
+                    ctx.pos += len;
+                },
+            ];
+        },
+        async (ctx) => {
+            const len = await readRollingUintNoAlloc(ctx);
+            const bytes = await ctx.readBytes(len);
+            const timeStr = td.decode(bytes);
+            return [new Date(timeStr)];
+        },
+        new Uint8Array([dataType.date]),
+    );
+}
