@@ -552,3 +552,28 @@ export function boolean(message?: string) {
         new Uint8Array([dataType.boolean]),
     );
 }
+
+export function uint8(message?: string) {
+    if (!message) message = "Data must be a uint8";
+    return base<number>(
+        "uint8",
+        (data) => {
+            if (typeof data !== "number" || !Number.isInteger(data) || data < 0 || data > 255) {
+                throw new ValidationError(message);
+            }
+            return 1;
+        },
+        (ctx, data) => {
+            if (typeof data !== "number" || !Number.isInteger(data) || data < 0 || data > 255) {
+                throw new ValidationError(message);
+            }
+            ctx.buf[ctx.pos] = data;
+            ctx.pos += 1;
+        },
+        async (ctx) => {
+            const byte = await ctx.readByte();
+            return [byte];
+        },
+        new Uint8Array([dataType.u8array]),
+    );
+}

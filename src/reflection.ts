@@ -1,4 +1,4 @@
-import { array, boolean, buffer, iterator, object, promise, string, uint8array, type ReadContext, type Schema } from "./schemas";
+import { array, boolean, buffer, iterator, object, promise, string, uint8, uint8array, type ReadContext, type Schema } from "./schemas";
 import { dataType, readRollingUintNoAlloc } from "./utils";
 
 const td = new TextDecoder();
@@ -31,6 +31,8 @@ export async function reflectByteReprToSchema(ctx: ReadContext): Promise<Schema<
             return promise(await reflectByteReprToSchema(ctx));
         case dataType.string:
             return string();
+        case dataType.uint8:
+            return uint8();
         default:
             throw new Error(`Unknown type byte in reflected schema: ${typeByte}`);
     }
