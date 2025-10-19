@@ -8,6 +8,7 @@ import {
     iterator,
     nullable,
     object,
+    optional,
     promise,
     string,
     uint,
@@ -77,6 +78,8 @@ export async function reflectByteReprToSchema(
             }
             return nullable(await reflectByteReprToSchema(ctx));
         }
+        case dataType.optional:
+            return optional(await reflectByteReprToSchema(ctx));
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

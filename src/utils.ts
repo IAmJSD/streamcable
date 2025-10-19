@@ -22,6 +22,7 @@ export const dataType = {
     int: 0x0d,
     float: 0x0e,
     nullable: 0x0f,
+    optional: 0x10,
 };
 
 export async function readRollingUintNoAlloc(

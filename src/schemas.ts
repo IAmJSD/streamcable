@@ -922,3 +922,44 @@ export function nullable<T = null>(inner?: Schema<T>) {
             : new Uint8Array([dataType.nullable, 0x00]), // special case because we need to know if no schema
     );
 }
+
+export function optional<T>(inner: Schema<T>) {
+    return base<T | undefined>(
+        "optional",
+        (data) => {
+            if (data === undefined) {
+                return [
+                    1,
+                    (ctx: WriteContext) => {
+                        ctx.buf[ctx.pos] = 0;
+                        ctx.pos += 1;
+                    },
+                ];
+            }
+            const [size, writer] = inner.validateAndMakeWriter(data);
+            return [
+                1 + size,
+                (ctx: WriteContext) => {
+                    ctx.buf[ctx.pos] = 1;
+                    ctx.pos += 1;
+                    writer(ctx);
+                },
+            ];
+        },
+        async (ctx, hijackReadContext) => {
+            const flag = await ctx.readByte();
+            if (flag === 0) {
+                return [undefined];
+            }
+            if (flag === 1) {
+                const value = await inner.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
+                return value as [T];
+            }
+            throw new Error("internal: Invalid optional flag");
+        },
+        new Uint8Array([dataType.optional, ...inner.schema]),
+    );
+}
