@@ -1,11 +1,11 @@
 {
     "name": "streamcable",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "A binary serialization format for objects optimized for streaming.",
     "author": "Astrid Gealer",
     "repository": {
         "type": "git",
-        "url": "git+ssh://github.com/IAmJSD/fluss.git"
+        "url": "git+ssh://github.com/IAmJSD/streamcable.git"
     },
     "main": "dist/index.js",
     "module": "dist/index.mjs",
