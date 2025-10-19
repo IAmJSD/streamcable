@@ -806,3 +806,34 @@ export function date(message?: string) {
         new Uint8Array([dataType.date]),
     );
 }
+
+export function int(message?: string) {
+    if (!message) message = "Data must be an int";
+    return base<number>(
+        "int",
+        (data) => {
+            if (typeof data !== "number" || !Number.isInteger(data)) {
+                throw new ValidationError(message);
+            }
+            // Zigzag encoding
+            const zigzagged = (data << 1) ^ (data >> 31);
+            return [
+                getRollingUintSize(zigzagged),
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(
+                        zigzagged,
+                        ctx.buf,
+                        ctx.pos,
+                    );
+                },
+            ];
+        },
+        async (ctx) => {
+            const zigzagged = await readRollingUintNoAlloc(ctx);
+            // Decode zigzag encoding
+            const value = (zigzagged >>> 1) ^ -(zigzagged & 1);
+            return [value];
+        },
+        new Uint8Array([dataType.int]),
+    );
+}

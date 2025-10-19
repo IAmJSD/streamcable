@@ -3,6 +3,7 @@ import {
     boolean,
     buffer,
     date,
+    int,
     iterator,
     object,
     promise,
@@ -62,6 +63,8 @@ export async function reflectByteReprToSchema(
         }
         case dataType.date:
             return date();
+        case dataType.int:
+            return int();
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

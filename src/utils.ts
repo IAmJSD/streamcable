@@ -17,6 +17,7 @@ export const dataType = {
     uint: 0x0a,
     union: 0x0b,
     date: 0x0c,
+    int: 0x0d,
 };
 
 export async function readRollingUintNoAlloc(
