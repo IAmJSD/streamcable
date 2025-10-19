@@ -1,11 +1,11 @@
 {
-    "name": "streampack",
+    "name": "streamcable",
     "version": "0.0.1",
     "description": "A binary serialization format for objects optimized for streaming.",
     "author": "Astrid Gealer",
     "repository": {
         "type": "git",
-        "url": "git+ssh://github.com/IAmJSD/streampack.git"
+        "url": "git+ssh://github.com/IAmJSD/fluss.git"
     },
     "main": "dist/index.js",
     "module": "dist/index.mjs",
@@ -16,7 +16,8 @@
     "license": "MIT",
     "scripts": {
         "format:fix": "prettier --write .",
-        "build": "tsup"
+        "build": "tsup",
+        "prepublishOnly": "npm run build"
     },
     "devDependencies": {
         "@types/node": "^20.4.2",
