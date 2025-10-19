@@ -1,4 +1,4 @@
-import { array, boolean, iterator, object, promise, string, uint8array, type ReadContext, type Schema } from "./schemas";
+import { array, boolean, buffer, iterator, object, promise, string, uint8array, type ReadContext, type Schema } from "./schemas";
 import { dataType, readRollingUintNoAlloc } from "./utils";
 
 const td = new TextDecoder();
@@ -10,8 +10,10 @@ export async function reflectByteReprToSchema(ctx: ReadContext): Promise<Schema<
             return array(await reflectByteReprToSchema(ctx));
         case dataType.boolean:
             return boolean();
-        case dataType.bytes:
+        case dataType.u8array:
             return uint8array();
+        case dataType.buffer:
+            return buffer();
         case dataType.iterator:
             return iterator(await reflectByteReprToSchema(ctx));
         case dataType.object: {

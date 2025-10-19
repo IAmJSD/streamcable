@@ -4,10 +4,15 @@ export const dataType = {
     array: 0x01,
     object: 0x02,
     string: 0x03,
-    bytes: 0x04,
-    promise: 0x05,
-    iterator: 0x06,
-    boolean: 0x07,
+
+    // Seperate so that JS can distinguish between Uint8Array and Buffer
+    // In most languages, treat both as byte arrays.
+    u8array: 0x04,
+    buffer: 0x05,
+
+    promise: 0x06,
+    iterator: 0x07,
+    boolean: 0x08,
 };
 
 export async function readRollingUintNoAlloc(ctx: ReadContext): Promise<number> {

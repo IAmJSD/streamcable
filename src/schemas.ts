@@ -277,7 +277,7 @@ export function uint8array(message?: string) {
             const bytes = await ctx.readBytes(len);
             return [bytes];
         },
-        new Uint8Array([dataType.bytes]),
+        new Uint8Array([dataType.u8array]),
     );
 }
 
@@ -302,7 +302,7 @@ export function buffer(message?: string) {
             const bytes = await ctx.readBytes(len);
             return [Buffer.from(bytes)];
         },
-        new Uint8Array([dataType.bytes]),
+        new Uint8Array([dataType.buffer]),
     );
 }
 
