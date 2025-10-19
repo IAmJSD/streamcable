@@ -9,6 +9,7 @@ import {
     uint,
     uint8,
     uint8array,
+    union,
     type ReadContext,
     type Schema,
 } from "./schemas";
@@ -50,6 +51,14 @@ export async function reflectByteReprToSchema(
             return uint8();
         case dataType.uint:
             return uint();
+        case dataType.union: {
+            const numOptions = (await readRollingUintNoAlloc(ctx)) + 1;
+            const options: Schema<any>[] = [];
+            for (let i = 0; i < numOptions; i++) {
+                options.push(await reflectByteReprToSchema(ctx));
+            }
+            return union(options.shift()!, ...options);
+        }
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,
