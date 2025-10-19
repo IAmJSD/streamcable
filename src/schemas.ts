@@ -837,3 +837,34 @@ export function int(message?: string) {
         new Uint8Array([dataType.int]),
     );
 }
+
+export function float(message?: string) {
+    if (!message) message = "Data must be a float";
+    return base<number>(
+        "float",
+        (data) => {
+            if (typeof data !== "number") {
+                throw new ValidationError(message);
+            }
+            return [
+                8,
+                (ctx: WriteContext) => {
+                    const view = new DataView(
+                        ctx.buf.buffer,
+                        ctx.buf.byteOffset + ctx.pos,
+                        8,
+                    );
+                    view.setFloat64(0, data, true);
+                    ctx.pos += 8;
+                },
+            ];
+        },
+        async (ctx) => {
+            const bytes = await ctx.readBytes(8);
+            const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+            const value = view.getFloat64(0, true);
+            return [value];
+        },
+        new Uint8Array([dataType.float]),
+    );
+}
