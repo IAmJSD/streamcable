@@ -963,3 +963,34 @@ export function optional<T>(inner: Schema<T>) {
         new Uint8Array([dataType.optional, ...inner.schema]),
     );
 }
+
+export function bigint(message?: string) {
+    if (!message) message = "Data must be a bigint";
+    return base<bigint>(
+        "bigint",
+        (data) => {
+            if (typeof data !== "bigint") {
+                throw new ValidationError(message);
+            }
+            return [
+                8,
+                (ctx: WriteContext) => {
+                    const view = new DataView(
+                        ctx.buf.buffer,
+                        ctx.buf.byteOffset + ctx.pos,
+                        8,
+                    );
+                    view.setBigUint64(0, data, true);
+                    ctx.pos += 8;
+                },
+            ];
+        },
+        async (ctx) => {
+            const bytes = await ctx.readBytes(8);
+            const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+            const value = view.getBigUint64(0, true);
+            return [value];
+        },
+        new Uint8Array([dataType.bigint]),
+    );
+}

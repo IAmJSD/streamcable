@@ -1,5 +1,6 @@
 import {
     array,
+    bigint,
     boolean,
     buffer,
     date,
@@ -80,6 +81,8 @@ export async function reflectByteReprToSchema(
         }
         case dataType.optional:
             return optional(await reflectByteReprToSchema(ctx));
+        case dataType.bigint:
+            return bigint();
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,
