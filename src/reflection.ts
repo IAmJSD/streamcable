@@ -1,4 +1,5 @@
 import {
+    any,
     array,
     bigint,
     boolean,
@@ -95,6 +96,8 @@ export async function reflectByteReprToSchema(
                 await reflectByteReprToSchema(ctx),
                 await reflectByteReprToSchema(ctx),
             );
+        case dataType.any:
+            return any();
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

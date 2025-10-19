@@ -1225,13 +1225,132 @@ export function map<K, V>(
     );
 }
 
+function reflectDataToSchema(data: any): Schema<any> {
+    if (Array.isArray(data)) {
+        const elementSchemas: Schema<any>[] = [];
+        const elementSet = new Set<string>();
+        for (const element of data) {
+            const res = reflectDataToSchema(element);
+            if (!elementSet.has(res.name)) {
+                elementSet.add(res.name);
+                elementSchemas.push(res);
+            }
+        }
+        if (elementSchemas.length === 0) {
+            return array(any());
+        }
+        if (elementSchemas.length === 1) {
+            return array(elementSchemas[0]);
+        }
+        return array(union(elementSchemas[0], ...elementSchemas.slice(1)));
+    }
+
+    switch (typeof data) {
+        case "boolean":
+            return boolean();
+        case "number":
+            if (Number.isInteger(data)) {
+                if (data >= 0) {
+                    return uint();
+                } else {
+                    return int();
+                }
+            } else {
+                return float();
+            }
+        case "bigint":
+            return bigint();
+        case "string":
+            return string();
+        case "object":
+            if (data === null) {
+                return nullable();
+            }
+            if (data instanceof Uint8Array) {
+                return uint8array();
+            }
+            if (data instanceof Map) {
+                // Reflect map key and value types
+                const keySchemas: Schema<any>[] = [];
+                const keySet = new Set<string>();
+                const valueSchemas: Schema<any>[] = [];
+                const valueSet = new Set<string>();
+                for (const [key, value] of data.entries()) {
+                    const keyRes = reflectDataToSchema(key);
+                    if (!keySet.has(keyRes.name)) {
+                        keySet.add(keyRes.name);
+                        keySchemas.push(keyRes);
+                    }
+                    const valueRes = reflectDataToSchema(value);
+                    if (!valueSet.has(valueRes.name)) {
+                        valueSet.add(valueRes.name);
+                        valueSchemas.push(valueRes);
+                    }
+                }
+                let keySchema: Schema<any>;
+                if (keySchemas.length === 0) {
+                    keySchema = any();
+                } else if (keySchemas.length === 1) {
+                    keySchema = keySchemas[0];
+                } else {
+                    keySchema = union(keySchemas[0], ...keySchemas.slice(1));
+                }
+                let valueSchema: Schema<any>;
+                if (valueSchemas.length === 0) {
+                    valueSchema = any();
+                } else if (valueSchemas.length === 1) {
+                    valueSchema = valueSchemas[0];
+                } else {
+                    valueSchema = union(
+                        valueSchemas[0],
+                        ...valueSchemas.slice(1),
+                    );
+                }
+                return map(keySchema, valueSchema);
+            }
+            if (data instanceof ReadableStream) {
+                return readableStream();
+            }
+            if (data[Symbol.iterator] || data[Symbol.asyncIterator]) {
+                return iterator(any());
+            }
+            if (data instanceof Date) {
+                return date();
+            }
+            if (data instanceof Promise) {
+                return promise(any());
+            }
+
+            const fields: Record<string, Schema<any>> = {};
+            for (const key of Object.keys(data)) {
+                if (Object.prototype.hasOwnProperty.call(data, key)) {
+                    fields[key] = reflectDataToSchema(data[key]);
+                }
+            }
+            return object(fields);
+        default:
+            throw new Error(
+                `internal: Cannot reflect data of unsupported type: ${typeof data}`,
+            );
+    }
+}
+
 export function any(message?: string) {
     if (!message) message = "Data must be any supported type";
 
     return base<any>(
         "any",
         (data) => {
-            throw new Error("TODO: serialize any type");
+            const schema = reflectDataToSchema(data);
+            const [size, writer] = schema.validateAndMakeWriter(data);
+            return [
+                schema.schema.length + size,
+                (ctx) => {
+                    ctx.buf.set(schema.schema, ctx.pos);
+                    ctx.pos += schema.schema.length;
+                    writer(ctx);
+                },
+            ];
         },
         async (ctx, hijackReadContext) => {
             const { reflectByteReprToSchema } = await import("./reflection");
