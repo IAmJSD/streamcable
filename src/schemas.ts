@@ -1,6 +1,7 @@
 import { OutOfDataError } from "./ReadContext";
 import { dataType, readRollingUintNoAlloc } from "./utils";
 import FlatPromiseStream from "./FlatPromiseStream";
+import type { output } from "./deserialize";
 
 export type WriteContext = {
     buf: Uint8Array;
@@ -992,5 +993,80 @@ export function bigint(message?: string) {
             return [value];
         },
         new Uint8Array([dataType.bigint]),
+    );
+}
+
+export function record<S extends Schema<any>>(
+    child: S,
+    message?: string,
+): Schema<Record<string, output<S>>> {
+    if (!message) message = "Data must be a record (object with string keys)";
+
+    return base<Record<string, output<S>>>(
+        "record",
+        (data) => {
+            if (
+                typeof data !== "object" ||
+                data === null ||
+                Array.isArray(data)
+            ) {
+                throw new ValidationError(message);
+            }
+            const writers: ((ctx: WriteContext) => void)[] = [];
+            const keys = Object.keys(data).filter((k) =>
+                Object.prototype.hasOwnProperty.call(data, k),
+            );
+            let size = getRollingUintSize(keys.length);
+            for (const key of keys) {
+                const keyLen = getEncodedLenNoAlloc(key);
+                size += getRollingUintSize(keyLen) + keyLen;
+                const [s, writer] = child.validateAndMakeWriter(
+                    (data as any)[key],
+                );
+                size += s;
+                writers.push(writer);
+            }
+            return [
+                size,
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(
+                        keys.length,
+                        ctx.buf,
+                        ctx.pos,
+                    );
+                    for (const key of keys) {
+                        const keyLen = getEncodedLenNoAlloc(key);
+                        ctx.pos = writeRollingUintNoAlloc(
+                            keyLen,
+                            ctx.buf,
+                            ctx.pos,
+                        );
+                        te.encodeInto(
+                            key,
+                            ctx.buf.subarray(ctx.pos, ctx.pos + keyLen),
+                        );
+                        ctx.pos += keyLen;
+                        const writer = writers.shift()!;
+                        writer(ctx);
+                    }
+                },
+            ];
+        },
+        async (ctx, hijackReadContext) => {
+            const len = await readRollingUintNoAlloc(ctx);
+            const res: Record<string, output<S>> = {};
+            for (let i = 0; i < len; i++) {
+                const keyLen = await readRollingUintNoAlloc(ctx);
+                const keyBytes = await ctx.readBytes(keyLen);
+                const key = td.decode(keyBytes);
+                const value = await child.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
+                res[key] = value[0];
+            }
+            return [res];
+        },
+        new Uint8Array([dataType.record, ...child.schema]),
     );
 }

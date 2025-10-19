@@ -1,4 +1,4 @@
-import { nullable, type ReadContext } from "./schemas";
+import { type ReadContext } from "./schemas";
 
 export const dataType = {
     // 0x00 is reserved
@@ -24,6 +24,12 @@ export const dataType = {
     nullable: 0x0f,
     optional: 0x10,
     bigint: 0x11,
+    readableStream: 0x12,
+
+    // Separate so that new types can be added later without conflict
+    // In most languages, treat both as maps
+    record: 0x13,
+    map: 0x14,
 };
 
 export async function readRollingUintNoAlloc(

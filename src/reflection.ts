@@ -11,6 +11,7 @@ import {
     object,
     optional,
     promise,
+    record,
     string,
     uint,
     uint8,
@@ -83,6 +84,12 @@ export async function reflectByteReprToSchema(
             return optional(await reflectByteReprToSchema(ctx));
         case dataType.bigint:
             return bigint();
+        case dataType.readableStream:
+            throw new Error("TODO: Implement readableStream schema reflection");
+        case dataType.record:
+            return record(await reflectByteReprToSchema(ctx));
+        case dataType.map:
+            throw new Error("TODO: Implement map schema reflection");
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,
