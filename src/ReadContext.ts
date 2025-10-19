@@ -10,15 +10,16 @@ export class ReadContext {
     private _promise: Promise<Uint8Array | null>;
 
     constructor(private reader: ReadableStreamDefaultReader<Uint8Array>) {
-        const r = () => this.reader.read().then(({ done, value }) => {
-            if (done) {
-                this._slices.push(null);
-                return null;
-            }
-            this._slices.push(value!);
-            this._promise = r();
-            return value!;
-        });
+        const r = () =>
+            this.reader.read().then(({ done, value }) => {
+                if (done) {
+                    this._slices.push(null);
+                    return null;
+                }
+                this._slices.push(value!);
+                this._promise = r();
+                return value!;
+            });
         this._promise = r();
     }
 
@@ -61,8 +62,14 @@ export class ReadContext {
                     if (slice === null) {
                         throw new OutOfDataError();
                     }
-                    const toCopy = Math.min(len - offset, slice.length - this._pos);
-                    result.set(slice.subarray(this._pos, this._pos + toCopy), offset);
+                    const toCopy = Math.min(
+                        len - offset,
+                        slice.length - this._pos,
+                    );
+                    result.set(
+                        slice.subarray(this._pos, this._pos + toCopy),
+                        offset,
+                    );
                     this._pos += toCopy;
                     offset += toCopy;
                     if (this._pos >= slice.length) {

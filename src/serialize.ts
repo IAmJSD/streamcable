@@ -50,7 +50,7 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
 
     // Defines the sender queue.
     let socketOpen = true;
-    let pendingQueue: [number, (Uint8Array | Buffer)][] | null = [];
+    let pendingQueue: [number, Uint8Array | Buffer][] | null = [];
     let socketId = 1;
     let connectedCount = 0;
     const wg = waitGroup();
@@ -60,35 +60,38 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
         let connected = true;
         connectedCount++;
 
-        return [id, (chunk: Uint8Array | Buffer | null) => {
-            if (!socketOpen) return;
-            if (!connected) throw new Error("Stream is closed");
+        return [
+            id,
+            (chunk: Uint8Array | Buffer | null) => {
+                if (!socketOpen) return;
+                if (!connected) throw new Error("Stream is closed");
 
-            if (chunk === null) {
-                connected = false;
-                connectedCount--;
-                if (connectedCount === 0) {
-                    pendingQueue = null;
+                if (chunk === null) {
+                    connected = false;
+                    connectedCount--;
+                    if (connectedCount === 0) {
+                        pendingQueue = null;
+                    }
+                    closer();
+                    return;
                 }
-                closer();
-                return;
-            }
 
-            if (pendingQueue !== null) {
-                pendingQueue.push([id, chunk]);
-                return;
-            }
+                if (pendingQueue !== null) {
+                    pendingQueue.push([id, chunk]);
+                    return;
+                }
 
-            if (socketOpen) {
-                const newAlloc = new Uint8Array(chunk.length + 2);
-                newAlloc[0] = (id >> 8) & 0xff;
-                newAlloc[1] = id & 0xff;
-                newAlloc.set(chunk, 2);
-                writer.write(newAlloc).catch(() => {
-                    socketOpen = false;
-                });
-            }
-        }] as [number, (chunk: Uint8Array | Buffer | null) => void];
+                if (socketOpen) {
+                    const newAlloc = new Uint8Array(chunk.length + 2);
+                    newAlloc[0] = (id >> 8) & 0xff;
+                    newAlloc[1] = id & 0xff;
+                    newAlloc.set(chunk, 2);
+                    writer.write(newAlloc).catch(() => {
+                        socketOpen = false;
+                    });
+                }
+            },
+        ] as [number, (chunk: Uint8Array | Buffer | null) => void];
     };
 
     // Write into the context.
@@ -137,7 +140,8 @@ export async function serialize<S extends Schema<any>>(
     const ourHash = await getHash(schema);
     const lastUpdateIsUs = lastUpdateHash === ourHash;
 
-    if (writable instanceof WritableStream) return browserSerialize(schema, writable, data, lastUpdateIsUs);
+    if (writable instanceof WritableStream)
+        return browserSerialize(schema, writable, data, lastUpdateIsUs);
 
     // Presume we have a node.js writable stream
 
@@ -159,7 +163,7 @@ export async function serialize<S extends Schema<any>>(
         buffer[0] = 1; // We need to send the schema.
         Buffer.from(schema.schema).copy(buffer, 1);
     }
-    
+
     // Defines the sender queue.
     let socketOpen = true;
     let pendingQueue: [number, Buffer][] | null = [];
@@ -172,38 +176,41 @@ export async function serialize<S extends Schema<any>>(
         let connected = true;
         connectedCount++;
 
-        return [id, (chunk: Uint8Array | Buffer | null) => {
-            if (!socketOpen) return;
-            if (!connected) throw new Error("Stream is closed");
+        return [
+            id,
+            (chunk: Uint8Array | Buffer | null) => {
+                if (!socketOpen) return;
+                if (!connected) throw new Error("Stream is closed");
 
-            if (chunk === null) {
-                connected = false;
-                connectedCount--;
-                if (connectedCount === 0) {
-                    pendingQueue = null;
-                    writable.end();
-                }
-                closer();
-                return;
-            }
-
-            if (pendingQueue !== null) {
-                pendingQueue.push([id, Buffer.from(chunk)]);
-                return;
-            }
-
-            if (socketOpen) {
-                const newAlloc = Buffer.allocUnsafe(chunk.length + 2);
-                newAlloc[0] = (id >> 8) & 0xff;
-                newAlloc[1] = id & 0xff;
-                Buffer.from(chunk).copy(newAlloc, 2);
-                writable.write(newAlloc, (err) => {
-                    if (err) {
-                        socketOpen = false;
+                if (chunk === null) {
+                    connected = false;
+                    connectedCount--;
+                    if (connectedCount === 0) {
+                        pendingQueue = null;
+                        writable.end();
                     }
-                });
-            }
-        }] as [number, (chunk: Uint8Array | Buffer | null) => void];
+                    closer();
+                    return;
+                }
+
+                if (pendingQueue !== null) {
+                    pendingQueue.push([id, Buffer.from(chunk)]);
+                    return;
+                }
+
+                if (socketOpen) {
+                    const newAlloc = Buffer.allocUnsafe(chunk.length + 2);
+                    newAlloc[0] = (id >> 8) & 0xff;
+                    newAlloc[1] = id & 0xff;
+                    Buffer.from(chunk).copy(newAlloc, 2);
+                    writable.write(newAlloc, (err) => {
+                        if (err) {
+                            socketOpen = false;
+                        }
+                    });
+                }
+            },
+        ] as [number, (chunk: Uint8Array | Buffer | null) => void];
     };
 
     // Write into the context.

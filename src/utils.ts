@@ -18,7 +18,9 @@ export const dataType = {
     union: 0x0b,
 };
 
-export async function readRollingUintNoAlloc(ctx: ReadContext): Promise<number> {
+export async function readRollingUintNoAlloc(
+    ctx: ReadContext,
+): Promise<number> {
     const firstByte = await ctx.readByte();
     if (firstByte < 0xfd) {
         return firstByte;
@@ -30,21 +32,20 @@ export async function readRollingUintNoAlloc(ctx: ReadContext): Promise<number> 
     if (firstByte === 0xfe) {
         const bytes = await ctx.readBytes(4);
         return (
-            bytes[0] |
-            (bytes[1] << 8) |
-            (bytes[2] << 16) |
-            (bytes[3] << 24)
-        ) >>> 0;
+            (bytes[0] |
+                (bytes[1] << 8) |
+                (bytes[2] << 16) |
+                (bytes[3] << 24)) >>>
+            0
+        );
     }
     const bytes = await ctx.readBytes(8);
     return (
-        (bytes[0] +
-            (bytes[1] << 8) +
-            (bytes[2] << 16) +
-            (bytes[3] << 24)) >>> 0 +
-        (bytes[4] * 2 ** 32) +
-        (bytes[5] * 2 ** 40) +
-        (bytes[6] * 2 ** 48) +
-        (bytes[7] * 2 ** 56)
+        (bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24)) >>>
+        (0 +
+            bytes[4] * 2 ** 32 +
+            bytes[5] * 2 ** 40 +
+            bytes[6] * 2 ** 48 +
+            bytes[7] * 2 ** 56)
     );
 }

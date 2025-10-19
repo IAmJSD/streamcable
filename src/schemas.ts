@@ -7,7 +7,7 @@ export type WriteContext = {
     pos: number;
     createWriteStream: () => [
         number,
-        (chunk: Uint8Array | Buffer | null) => void
+        (chunk: Uint8Array | Buffer | null) => void,
     ];
 };
 
@@ -18,10 +18,9 @@ export type ReadContext = {
 
 function base<T>(
     name: string,
-    validateAndMakeWriter: (data: unknown) => [
-        number,
-        (ctx: WriteContext) => void,
-    ],
+    validateAndMakeWriter: (
+        data: unknown,
+    ) => [number, (ctx: WriteContext) => void],
     readFromContext: (
         ctx: ReadContext,
         hijackReadContext: (
@@ -69,10 +68,7 @@ function getEncodedLenNoAlloc(t: string) {
     return len;
 }
 
-export function pipe<T>(
-    from: Schema<T>,
-    into: (data: T) => T,
-): Schema<T> {
+export function pipe<T>(from: Schema<T>, into: (data: T) => T): Schema<T> {
     return {
         name: "pipe",
         validateAndMakeWriter: (data) => {
@@ -142,18 +138,28 @@ export function array<T>(elements: Schema<T>, message?: string) {
                 size += s;
                 writers.push(writer);
             }
-            return [size, (ctx: WriteContext) => {
-                ctx.pos = writeRollingUintNoAlloc(data.length, ctx.buf, ctx.pos);
-                for (const writer of writers) {
-                    writer(ctx);
-                }
-            }];
+            return [
+                size,
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(
+                        data.length,
+                        ctx.buf,
+                        ctx.pos,
+                    );
+                    for (const writer of writers) {
+                        writer(ctx);
+                    }
+                },
+            ];
         },
         async (ctx, hijackReadContext) => {
             const len = await readRollingUintNoAlloc(ctx);
             const res: T[] = [];
             for (let i = 0; i < len; i++) {
-                const item = await elements.readFromContext(ctx, hijackReadContext);
+                const item = await elements.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
                 res.push(item[0]);
             }
             return [res];
@@ -206,26 +212,38 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
     return base<Resolved>(
         "object",
         (data) => {
-            if (typeof data !== "object" || data === null || Array.isArray(data)) {
+            if (
+                typeof data !== "object" ||
+                data === null ||
+                Array.isArray(data)
+            ) {
                 throw new ValidationError(message);
             }
             let size = 0;
             const writers: ((ctx: WriteContext) => void)[] = [];
             for (const key of keys) {
-                const [s, writer] = schemas[key].validateAndMakeWriter((data as any)[key]);
+                const [s, writer] = schemas[key].validateAndMakeWriter(
+                    (data as any)[key],
+                );
                 size += s;
                 writers.push(writer);
             }
-            return [size, (ctx: WriteContext) => {
-                for (const writer of writers) {
-                    writer(ctx);
-                }
-            }];
+            return [
+                size,
+                (ctx: WriteContext) => {
+                    for (const writer of writers) {
+                        writer(ctx);
+                    }
+                },
+            ];
         },
         async (ctx, hijackReadContext) => {
             const res: any = {};
             for (const key of keys) {
-                const value = await schemas[key].readFromContext(ctx, hijackReadContext);
+                const value = await schemas[key].readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
                 res[key] = value[0];
             }
             return [res as Resolved];
@@ -243,11 +261,17 @@ export function string(message?: string) {
         (data) => {
             if (typeof data !== "string") throw new ValidationError(message);
             const len = getEncodedLenNoAlloc(data);
-            return [getRollingUintSize(len) + len, (ctx: WriteContext) => {
-                ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
-                te.encodeInto(data, ctx.buf.subarray(ctx.pos, ctx.pos + len));
-                ctx.pos += len;
-            }];
+            return [
+                getRollingUintSize(len) + len,
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                    te.encodeInto(
+                        data,
+                        ctx.buf.subarray(ctx.pos, ctx.pos + len),
+                    );
+                    ctx.pos += len;
+                },
+            ];
         },
         async (ctx) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -264,14 +288,18 @@ export function uint8array(message?: string) {
     return base<Uint8Array>(
         "uint8array",
         (data) => {
-            if (!(data instanceof Uint8Array)) throw new ValidationError(message);
+            if (!(data instanceof Uint8Array))
+                throw new ValidationError(message);
             const len = data.length;
-            return [getRollingUintSize(len) + len, (ctx: WriteContext) => {
-                const len = data.length;
-                ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
-                ctx.buf.set(data, ctx.pos);
-                ctx.pos += len;
-            }];
+            return [
+                getRollingUintSize(len) + len,
+                (ctx: WriteContext) => {
+                    const len = data.length;
+                    ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                    ctx.buf.set(data, ctx.pos);
+                    ctx.pos += len;
+                },
+            ];
         },
         async (ctx) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -289,12 +317,15 @@ export function buffer(message?: string) {
         (data) => {
             if (!Buffer.isBuffer(data)) throw new ValidationError(message);
             const len = data.length;
-            return [getRollingUintSize(len) + len, (ctx: WriteContext) => {
-                const len = data.length;
-                ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
-                ctx.buf.set(data, ctx.pos);
-                ctx.pos += len;
-            }];
+            return [
+                getRollingUintSize(len) + len,
+                (ctx: WriteContext) => {
+                    const len = data.length;
+                    ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                    ctx.buf.set(data, ctx.pos);
+                    ctx.pos += len;
+                },
+            ];
         },
         async (ctx) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -306,7 +337,10 @@ export function buffer(message?: string) {
 }
 
 export class SerializableError<T> extends Error {
-    constructor(public schema: Schema<T>, public data: T) {
+    constructor(
+        public schema: Schema<T>,
+        public data: T,
+    ) {
         super("SerializableError");
         this.name = "SerializableError";
     }
@@ -321,46 +355,53 @@ export function promise<T>(inner: Schema<T>, message?: string) {
         "promise",
         (data) => {
             if (!(data instanceof Promise)) throw new ValidationError(message);
-    
-            return [2, (ctx: WriteContext) => {
-                const [id, writer] = ctx.createWriteStream();
-                ctx.buf[ctx.pos] = (id >> 8) & 0xff;
-                ctx.buf[ctx.pos + 1] = id & 0xff;
-                ctx.pos += 2;
-                const scratch: any[] = [];
-                data.then((value) => {
-                    const [size, ctxWriter] = inner.validateAndMakeWriter(value);
-                    const buf = new Uint8Array(1 + size); // 1 byte for success flag
-                    buf[0] = 1; // success
-                    const writeCtx: WriteContext = {
-                        buf,
-                        pos: 1,
-                        createWriteStream: ctx.createWriteStream,
-                    };
-                    ctxWriter(writeCtx);
-                    writer(buf);
-                    writer(null);
-                }).catch((err) => {
-                    if (err instanceof SerializableError) {
-                        // Get the size of the serialized error data
-                        const [size, ctxWriter] = err.schema.validateAndMakeWriter(err.data);
-                        const buf = new Uint8Array(1 + err.schema.schema.length + size);
-                        buf[0] = 0; // failure
-                        buf.set(err.schema.schema, 1);
+
+            return [
+                2,
+                (ctx: WriteContext) => {
+                    const [id, writer] = ctx.createWriteStream();
+                    ctx.buf[ctx.pos] = (id >> 8) & 0xff;
+                    ctx.buf[ctx.pos + 1] = id & 0xff;
+                    ctx.pos += 2;
+                    const scratch: any[] = [];
+                    data.then((value) => {
+                        const [size, ctxWriter] =
+                            inner.validateAndMakeWriter(value);
+                        const buf = new Uint8Array(1 + size); // 1 byte for success flag
+                        buf[0] = 1; // success
                         const writeCtx: WriteContext = {
                             buf,
-                            pos: 1 + err.schema.schema.length,
+                            pos: 1,
                             createWriteStream: ctx.createWriteStream,
                         };
                         ctxWriter(writeCtx);
                         writer(buf);
                         writer(null);
-                        return;
-                    }
+                    }).catch((err) => {
+                        if (err instanceof SerializableError) {
+                            // Get the size of the serialized error data
+                            const [size, ctxWriter] =
+                                err.schema.validateAndMakeWriter(err.data);
+                            const buf = new Uint8Array(
+                                1 + err.schema.schema.length + size,
+                            );
+                            buf[0] = 0; // failure
+                            buf.set(err.schema.schema, 1);
+                            const writeCtx: WriteContext = {
+                                buf,
+                                pos: 1 + err.schema.schema.length,
+                                createWriteStream: ctx.createWriteStream,
+                            };
+                            ctxWriter(writeCtx);
+                            writer(buf);
+                            writer(null);
+                            return;
+                        }
 
-                    throw err;
-                });
-            }];
+                        throw err;
+                    });
+                },
+            ];
         },
         async (ctx, hijackReadContext) => {
             const idHigh = await ctx.readByte();
@@ -369,34 +410,56 @@ export function promise<T>(inner: Schema<T>, message?: string) {
 
             let cleanup: (slurp: boolean) => void;
             const promise = new Promise<T>((resolve, reject) => {
-                cleanup = hijackReadContext(id, async (streamCtx) => {
-                    try {
-                        const flag = await streamCtx.readByte();
-                        if (flag === 1) {
-                            // success
-                            const value = await inner.readFromContext(streamCtx, hijackReadContext);
-                            resolve(value[0]);
-                            return;
-                        }
+                cleanup = hijackReadContext(
+                    id,
+                    async (streamCtx) => {
+                        try {
+                            const flag = await streamCtx.readByte();
+                            if (flag === 1) {
+                                // success
+                                const value = await inner.readFromContext(
+                                    streamCtx,
+                                    hijackReadContext,
+                                );
+                                resolve(value[0]);
+                                return;
+                            }
 
-                        if (flag === 0) {
-                            // failure
-                            const { reflectByteReprToSchema } = await import("./reflection");
-                            const errorSchema = await reflectByteReprToSchema(streamCtx);
-                            const errorData = await errorSchema.readFromContext(streamCtx, hijackReadContext);
-                            reject(new SerializableError(errorSchema, errorData[0]));
-                            return;
-                        }
+                            if (flag === 0) {
+                                // failure
+                                const { reflectByteReprToSchema } =
+                                    await import("./reflection");
+                                const errorSchema =
+                                    await reflectByteReprToSchema(streamCtx);
+                                const errorData =
+                                    await errorSchema.readFromContext(
+                                        streamCtx,
+                                        hijackReadContext,
+                                    );
+                                reject(
+                                    new SerializableError(
+                                        errorSchema,
+                                        errorData[0],
+                                    ),
+                                );
+                                return;
+                            }
 
-                        reject(new Error("internal: Invalid promise resolution flag"));
-                    } catch (err) {
-                        reject(err);
-                    } finally {
-                        cleanup(false);
-                    }
-                }, () => {
-                    reject(new OutOfDataError());
-                });
+                            reject(
+                                new Error(
+                                    "internal: Invalid promise resolution flag",
+                                ),
+                            );
+                        } catch (err) {
+                            reject(err);
+                        } finally {
+                            cleanup(false);
+                        }
+                    },
+                    () => {
+                        reject(new OutOfDataError());
+                    },
+                );
             });
             const finalizer = new FinalizationRegistry(() => {
                 cleanup(true);
@@ -418,53 +481,65 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
     return base<Iterable<T> | AsyncIterable<T>>(
         "iterator",
         (data) => {
-            if (typeof data !== "object" || data === null || (!(data as any)[Symbol.iterator] && !(data as any)[Symbol.asyncIterator])) {
+            if (
+                typeof data !== "object" ||
+                data === null ||
+                (!(data as any)[Symbol.iterator] &&
+                    !(data as any)[Symbol.asyncIterator])
+            ) {
                 throw new ValidationError(message);
             }
-            return [2, (ctx: WriteContext) => {
-                const [id, writer] = ctx.createWriteStream();
-                ctx.buf[ctx.pos] = (id >> 8) & 0xff;
-                ctx.buf[ctx.pos + 1] = id & 0xff;
-                ctx.pos += 2;
-                (async () => {
-                    try {
-                        for await (const item of data as any) {
-                            const [size, ctxWriter] = elements.validateAndMakeWriter(item);
-                            const buf = new Uint8Array(1 + size); // 1 byte for continuation flag
-                            buf[0] = 1; // continuation
-                            const writeCtx: WriteContext = {
-                                buf,
-                                pos: 1,
-                                createWriteStream: ctx.createWriteStream,
-                            };
-                            ctxWriter(writeCtx);
-                            writer(buf);
-                        }
-                        const buf = new Uint8Array(1);
-                        writer(buf);
-                        writer(null);
-                    } catch (err) {
-                        if (err instanceof SerializableError) {
-                            // Get the size of the serialized error data
-                            const [size, ctxWriter] = err.schema.validateAndMakeWriter(err.data);
-                            const buf = new Uint8Array(1 + err.schema.schema.length + size);
-                            buf[0] = 2; // error flag
-                            buf.set(err.schema.schema, 1);
-                            const writeCtx: WriteContext = {
-                                buf,
-                                pos: 1 + err.schema.schema.length,
-                                createWriteStream: ctx.createWriteStream,
-                            };
-                            ctxWriter(writeCtx);
+            return [
+                2,
+                (ctx: WriteContext) => {
+                    const [id, writer] = ctx.createWriteStream();
+                    ctx.buf[ctx.pos] = (id >> 8) & 0xff;
+                    ctx.buf[ctx.pos + 1] = id & 0xff;
+                    ctx.pos += 2;
+                    (async () => {
+                        try {
+                            for await (const item of data as any) {
+                                const [size, ctxWriter] =
+                                    elements.validateAndMakeWriter(item);
+                                const buf = new Uint8Array(1 + size); // 1 byte for continuation flag
+                                buf[0] = 1; // continuation
+                                const writeCtx: WriteContext = {
+                                    buf,
+                                    pos: 1,
+                                    createWriteStream: ctx.createWriteStream,
+                                };
+                                ctxWriter(writeCtx);
+                                writer(buf);
+                            }
+                            const buf = new Uint8Array(1);
                             writer(buf);
                             writer(null);
-                            return;
-                        }
+                        } catch (err) {
+                            if (err instanceof SerializableError) {
+                                // Get the size of the serialized error data
+                                const [size, ctxWriter] =
+                                    err.schema.validateAndMakeWriter(err.data);
+                                const buf = new Uint8Array(
+                                    1 + err.schema.schema.length + size,
+                                );
+                                buf[0] = 2; // error flag
+                                buf.set(err.schema.schema, 1);
+                                const writeCtx: WriteContext = {
+                                    buf,
+                                    pos: 1 + err.schema.schema.length,
+                                    createWriteStream: ctx.createWriteStream,
+                                };
+                                ctxWriter(writeCtx);
+                                writer(buf);
+                                writer(null);
+                                return;
+                            }
 
-                        throw err;
-                    }
-                })();
-            }];
+                            throw err;
+                        }
+                    })();
+                },
+            ];
         },
         async (ctx, hijackReadContext) => {
             const idHigh = await ctx.readByte();
@@ -473,41 +548,59 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
 
             const promiseStream = new FlatPromiseStream<T | typeof done_>();
             let cleanup: (slurp: boolean) => void;
-            cleanup = hijackReadContext(id, async (streamCtx) => {
-                try {
-                    const flag = await streamCtx.readByte();
-                    if (flag === 1) {
-                        // continuation
-                        const value = await elements.readFromContext(streamCtx, hijackReadContext);
-                        promiseStream.resolve(value[0]);
-                        return;
-                    }
+            cleanup = hijackReadContext(
+                id,
+                async (streamCtx) => {
+                    try {
+                        const flag = await streamCtx.readByte();
+                        if (flag === 1) {
+                            // continuation
+                            const value = await elements.readFromContext(
+                                streamCtx,
+                                hijackReadContext,
+                            );
+                            promiseStream.resolve(value[0]);
+                            return;
+                        }
 
-                    if (flag === 0) {
-                        // end of iterator
-                        promiseStream.resolve(done_);
+                        if (flag === 0) {
+                            // end of iterator
+                            promiseStream.resolve(done_);
+                            cleanup(false);
+                            return;
+                        }
+
+                        if (flag === 2) {
+                            // error
+                            const { reflectByteReprToSchema } = await import(
+                                "./reflection"
+                            );
+                            const errorSchema =
+                                await reflectByteReprToSchema(streamCtx);
+                            const errorData = await errorSchema.readFromContext(
+                                streamCtx,
+                                hijackReadContext,
+                            );
+                            promiseStream.reject(
+                                new SerializableError(
+                                    errorSchema,
+                                    errorData[0],
+                                ),
+                            );
+                            cleanup(false);
+                            return;
+                        }
+
+                        throw new Error("internal: Invalid iterator flag");
+                    } catch (err) {
+                        promiseStream.reject(err);
                         cleanup(false);
-                        return;
                     }
-
-                    if (flag === 2) {
-                        // error
-                        const { reflectByteReprToSchema } = await import("./reflection");
-                        const errorSchema = await reflectByteReprToSchema(streamCtx);
-                        const errorData = await errorSchema.readFromContext(streamCtx, hijackReadContext);
-                        promiseStream.reject(new SerializableError(errorSchema, errorData[0]));
-                        cleanup(false);
-                        return;
-                    }
-
-                    throw new Error("internal: Invalid iterator flag");
-                } catch (err) {
-                    promiseStream.reject(err);
-                    cleanup(false);
-                }
-            }, () => {
-                promiseStream.reject(new OutOfDataError());
-            });
+                },
+                () => {
+                    promiseStream.reject(new OutOfDataError());
+                },
+            );
 
             const finalizer = new FinalizationRegistry(() => {
                 cleanup(true);
@@ -536,10 +629,13 @@ export function boolean(message?: string) {
         "boolean",
         (data) => {
             if (typeof data !== "boolean") throw new ValidationError(message);
-            return [1, (ctx: WriteContext) => {
-                ctx.buf[ctx.pos] = data ? 1 : 0;
-                ctx.pos += 1;
-            }];
+            return [
+                1,
+                (ctx: WriteContext) => {
+                    ctx.buf[ctx.pos] = data ? 1 : 0;
+                    ctx.pos += 1;
+                },
+            ];
         },
         async (ctx) => {
             const byte = await ctx.readByte();
@@ -556,7 +652,12 @@ export function uint8(message?: string) {
     return base<number>(
         "uint8",
         (data) => {
-            if (typeof data !== "number" || !Number.isInteger(data) || data < 0 || data > 255) {
+            if (
+                typeof data !== "number" ||
+                !Number.isInteger(data) ||
+                data < 0 ||
+                data > 255
+            ) {
                 throw new ValidationError(message);
             }
             return [
@@ -565,7 +666,7 @@ export function uint8(message?: string) {
                     ctx.buf[ctx.pos] = data;
                     ctx.pos += 1;
                 },
-            ]
+            ];
         },
         async (ctx) => {
             const byte = await ctx.readByte();
@@ -580,7 +681,11 @@ export function uint(message?: string) {
     return base<number>(
         "uint",
         (data) => {
-            if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+            if (
+                typeof data !== "number" ||
+                !Number.isInteger(data) ||
+                data < 0
+            ) {
                 throw new ValidationError(message);
             }
             return [
@@ -588,7 +693,7 @@ export function uint(message?: string) {
                 (ctx: WriteContext) => {
                     ctx.pos = writeRollingUintNoAlloc(data, ctx.buf, ctx.pos);
                 },
-            ]
+            ];
         },
         async (ctx) => {
             const value = await readRollingUintNoAlloc(ctx);
@@ -601,10 +706,7 @@ export function uint(message?: string) {
 export function union<
     Schema1 extends Schema<any>,
     OtherSchemas extends Schema<any>[],
->(
-    first: Schema1,
-    ...others: OtherSchemas
-) {
+>(first: Schema1, ...others: OtherSchemas) {
     others.unshift(first);
 
     let schemaLen = 1 + getRollingUintSize(others.length - 1); // 1 byte for dataType, plus index size
@@ -656,7 +758,7 @@ export function union<
                 (ctx: WriteContext) => {
                     ctx.pos = writeRollingUintNoAlloc(idx, ctx.buf, ctx.pos);
                     writer![1](ctx);
-                }
+                },
             ];
         },
         async (ctx, hijackReadContext) => {
@@ -664,7 +766,10 @@ export function union<
             if (index < 0 || index >= others.length) {
                 throw new Error("internal: Invalid union schema index");
             }
-            const value = await others[index].readFromContext(ctx, hijackReadContext);
+            const value = await others[index].readFromContext(
+                ctx,
+                hijackReadContext,
+            );
             return value as any;
         },
         schema,

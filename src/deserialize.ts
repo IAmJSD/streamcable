@@ -3,24 +3,30 @@ import { ReadContext, OutOfDataError } from "./ReadContext";
 
 const weakHashMap = new WeakMap<Uint8Array, string>();
 
-export type output<T extends Schema<any>> = T extends Schema<infer R> ? R : never;
+export type output<T extends Schema<any>> =
+    T extends Schema<infer R> ? R : never;
 
 export async function getHash(schema: Schema<any>) {
     const res = weakHashMap.get(schema.schema);
     if (res) return res;
 
-    const hash = await crypto.subtle.digest("SHA-1", schema.schema).then((buf) => {
-        return Array.from(new Uint8Array(buf))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
-    });
+    const hash = await crypto.subtle
+        .digest("SHA-1", schema.schema)
+        .then((buf) => {
+            return Array.from(new Uint8Array(buf))
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("");
+        });
     weakHashMap.set(schema.schema, hash);
     return hash;
 }
 
 export async function deserialize<S extends Schema<any>>(
     schema: S,
-    getReader: (schemaHash: string, abortSignal: AbortSignal) => Promise<ReadableStream<Uint8Array>>,
+    getReader: (
+        schemaHash: string,
+        abortSignal: AbortSignal,
+    ) => Promise<ReadableStream<Uint8Array>>,
 ): Promise<output<S>> {
     const schemaHash = await getHash(schema);
     const abortController = new AbortController();
@@ -33,7 +39,7 @@ export async function deserialize<S extends Schema<any>>(
     if (payloadHasSchema === 1) {
         // Use reflection to read the schema.
         const { reflectByteReprToSchema } = await import("./reflection");
-        schema = await reflectByteReprToSchema(readCtx) as S;
+        schema = (await reflectByteReprToSchema(readCtx)) as S;
     }
 
     const disconnectHandlers = new Map<number, () => void>();
@@ -63,7 +69,9 @@ export async function deserialize<S extends Schema<any>>(
         };
     };
 
-    const result = (await schema.readFromContext(readCtx, hijackReadContext))[0];
+    const result = (
+        await schema.readFromContext(readCtx, hijackReadContext)
+    )[0];
     if (usages === 0) {
         // Abort now.
         abortController.abort();
