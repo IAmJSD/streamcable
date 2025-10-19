@@ -574,7 +574,7 @@ export function uint8(message?: string) {
             const byte = await ctx.readByte();
             return [byte];
         },
-        new Uint8Array([dataType.u8array]),
+        new Uint8Array([dataType.uint8]),
     );
 }
 
@@ -598,6 +598,6 @@ export function uint(message?: string) {
             const value = await readRollingUintNoAlloc(ctx);
             return [value];
         },
-        new Uint8Array([dataType.u8array]),
+        new Uint8Array([dataType.uint]),
     );
 }
