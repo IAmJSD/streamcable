@@ -1,3 +1,4 @@
+import { OutOfDataError } from "./ReadContext";
 import { dataType, readRollingUintNoAlloc } from "./utils";
 
 export type WriteContext = {
@@ -23,6 +24,7 @@ function base<T>(
         hijackReadContext: (
             id: number,
             cb: (ctx: ReadContext) => Promise<void>,
+            onDisconnect: () => void,
         ) => (slurp: boolean) => void,
     ) => Promise<[T]>,
     schema: Uint8Array<ArrayBuffer>,
@@ -389,10 +391,11 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                         reject(new Error("internal: Invalid promise resolution flag"));
                     } catch (err) {
                         reject(err);
-                        return;
                     } finally {
                         cleanup(false);
                     }
+                }, () => {
+                    reject(new OutOfDataError());
                 });
             });
             const finalizer = new FinalizationRegistry(() => {
@@ -466,7 +469,7 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
             const idLow = await ctx.readByte();
             const id = (idHigh << 8) | idLow;
 
-            throw new Error("iterator deserialization is not yet implemented");
+            throw new Error("Not implemented yet");
         },
         schema,
     );

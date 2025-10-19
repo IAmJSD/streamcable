@@ -1,5 +1,5 @@
 import type { Schema } from "./schemas";
-import ReadContext from "./ReadContext";
+import { ReadContext, OutOfDataError } from "./ReadContext";
 
 const weakHashMap = new WeakMap<Uint8Array, string>();
 
@@ -36,14 +36,22 @@ export async function deserialize<S extends Schema<any>>(
         schema = await reflectByteReprToSchema(readCtx) as S;
     }
 
+    const disconnectHandlers = new Map<number, () => void>();
+
     let usages = 0;
-    const hijackReadContext = (id: number, fn: (ctx: ReadContext) => Promise<void>) => {
+    const hijackReadContext = (
+        id: number,
+        fn: (ctx: ReadContext) => Promise<void>,
+        onDisconnect: () => void,
+    ) => {
         usages++;
         handlers.set(id, fn);
+        disconnectHandlers.set(id, onDisconnect);
         let cleanedUp = false;
         return (slurp: boolean) => {
             if (cleanedUp) return;
             cleanedUp = true;
+            disconnectHandlers.delete(id);
             if (!slurp) {
                 handlers.delete(id);
             }
@@ -62,14 +70,23 @@ export async function deserialize<S extends Schema<any>>(
     }
 
     (async () => {
-        while (usages > 0) {
-            const idHigh = await readCtx.readByte();
-            const idLow = await readCtx.readByte();
-            const id = (idHigh << 8) | idLow;
+        try {
+            while (usages > 0) {
+                const idHigh = await readCtx.readByte();
+                const idLow = await readCtx.readByte();
+                const id = (idHigh << 8) | idLow;
 
-            const handler = handlers.get(id);
-            if (handler) {
-                await handler(readCtx);
+                const handler = handlers.get(id);
+                if (handler) {
+                    await handler(readCtx);
+                }
+            }
+        } catch (e) {
+            if (!(e instanceof OutOfDataError)) {
+                throw e;
+            }
+            for (const disconnectHandler of disconnectHandlers.values()) {
+                disconnectHandler();
             }
         }
     })();

@@ -1,4 +1,10 @@
-export default class ReadContext {
+export class OutOfDataError extends Error {
+    constructor() {
+        super("Attempt to read past end of stream");
+    }
+}
+
+export class ReadContext {
     private _slices: (Uint8Array | null)[] = [];
     private _pos = 0;
     private _promise: Promise<Uint8Array | null>;
@@ -21,7 +27,7 @@ export default class ReadContext {
             if (this._slices.length) {
                 const slice = this._slices[0];
                 if (slice === null) {
-                    throw new Error("Attempt to read past end of stream");
+                    throw new OutOfDataError();
                 }
                 if (this._pos < slice.length) {
                     return slice[this._pos++];
@@ -36,11 +42,11 @@ export default class ReadContext {
 
         const slice = await this._promise;
         if (slice === null) {
-            throw new Error("Attempt to read past end of stream");
+            throw new OutOfDataError();
         }
         this._pos = 1;
         if (slice[0] === undefined) {
-            throw new Error("Attempt to read past end of stream");
+            throw new OutOfDataError();
         }
         return slice[0];
     }
@@ -53,7 +59,7 @@ export default class ReadContext {
                 if (this._slices.length) {
                     const slice = this._slices[0];
                     if (slice === null) {
-                        throw new Error("Attempt to read past end of stream");
+                        throw new OutOfDataError();
                     }
                     const toCopy = Math.min(len - offset, slice.length - this._pos);
                     result.set(slice.subarray(this._pos, this._pos + toCopy), offset);
@@ -75,7 +81,7 @@ export default class ReadContext {
             }
             const slice = await this._promise;
             if (slice === null) {
-                throw new Error("Attempt to read past end of stream");
+                throw new OutOfDataError();
             }
             this._pos = 0;
         }
