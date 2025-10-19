@@ -1,5 +1,6 @@
-import type NodeStream from "stream";
-import type { Schema, WriteContext } from "./schemas";
+import type { Writable } from "stream";
+import type { Schema } from "./schemas";
+import type { WriteContext } from "./utils";
 import { getHash, output } from "./deserialize";
 
 function waitGroup() {
@@ -133,7 +134,7 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
 
 export async function serialize<S extends Schema<any>>(
     schema: S,
-    writable: NodeStream.Writable | WritableStream<Uint8Array>,
+    writable: Writable | WritableStream<Uint8Array>,
     data: output<S>,
     lastUpdateHash?: string,
 ) {

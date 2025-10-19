@@ -20,10 +20,9 @@ import {
     uint8,
     uint8array,
     union,
-    type ReadContext,
     type Schema,
 } from "./schemas";
-import { dataType, readRollingUintNoAlloc } from "./utils";
+import { dataType, readRollingUintNoAlloc, type ReadContext } from "./utils";
 
 const td = new TextDecoder();
 

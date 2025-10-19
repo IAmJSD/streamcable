@@ -1,4 +1,8 @@
-import { type ReadContext } from "./schemas";
+export type ReadContext = {
+    readByte: () => Promise<number>;
+    peekByte: () => Promise<number>;
+    readBytes: (length: number) => Promise<Uint8Array>;
+};
 
 export const dataType = {
     // 0x00 is reserved
@@ -65,3 +69,12 @@ export async function readRollingUintNoAlloc(
             bytes[7] * 2 ** 56)
     );
 }
+
+export type WriteContext = {
+    buf: Uint8Array;
+    pos: number;
+    createWriteStream: () => [
+        number,
+        (chunk: Uint8Array | Buffer | null) => void,
+    ];
+};

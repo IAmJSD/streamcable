@@ -1,12 +1,27 @@
 {
     "name": "streampack",
     "version": "0.0.1",
+    "description": "A binary serialization format for objects optimized for streaming.",
+    "author": "Astrid Gealer",
+    "repository": {
+        "type": "git",
+        "url": "git+ssh://github.com/IAmJSD/streampack.git"
+    },
+    "main": "dist/index.js",
+    "module": "dist/index.mjs",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "license": "MIT",
     "scripts": {
-        "format:fix": "prettier --write ."
+        "format:fix": "prettier --write .",
+        "build": "tsup"
     },
     "devDependencies": {
         "@types/node": "^20.4.2",
         "typescript": "^5.1.6",
-        "prettier": "^3.6.2"
+        "prettier": "^3.6.2",
+        "tsup": "8.5.0"
     }
 }

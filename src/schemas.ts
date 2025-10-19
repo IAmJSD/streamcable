@@ -1,22 +1,12 @@
 import { OutOfDataError } from "./ReadContext";
-import { dataType, readRollingUintNoAlloc } from "./utils";
+import {
+    dataType,
+    readRollingUintNoAlloc,
+    ReadContext,
+    WriteContext,
+} from "./utils";
 import FlatPromiseStream from "./FlatPromiseStream";
 import type { output } from "./deserialize";
-
-export type WriteContext = {
-    buf: Uint8Array;
-    pos: number;
-    createWriteStream: () => [
-        number,
-        (chunk: Uint8Array | Buffer | null) => void,
-    ];
-};
-
-export type ReadContext = {
-    readByte: () => Promise<number>;
-    peekByte: () => Promise<number>;
-    readBytes: (length: number) => Promise<Uint8Array>;
-};
 
 function base<T>(
     name: string,
