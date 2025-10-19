@@ -996,6 +996,96 @@ export function bigint(message?: string) {
     );
 }
 
+export function readableStream(message?: string) {
+    if (!message) message = "Data must be a ReadableStream";
+
+    return base<ReadableStream<Uint8Array>>(
+        "readableStream",
+        (data) => {
+            if (!(data instanceof ReadableStream)) {
+                throw new ValidationError(message);
+            }
+            return [
+                2,
+                (ctx: WriteContext) => {
+                    const [id, writer] = ctx.createWriteStream();
+                    ctx.buf[ctx.pos] = (id >> 8) & 0xff;
+                    ctx.buf[ctx.pos + 1] = id & 0xff;
+                    ctx.pos += 2;
+                    (async () => {
+                        try {
+                            const reader = data.getReader();
+                            for (;;) {
+                                const { done, value } = await reader.read();
+                                if (done) {
+                                    writer(new Uint8Array(1));
+                                    writer(null);
+                                    break;
+                                }
+                                if ((value as Uint8Array).length === 0) {
+                                    continue;
+                                }
+                                const arr = new Uint8Array(
+                                    getRollingUintSize(
+                                        (value as Uint8Array).length,
+                                    ) + (value as Uint8Array).length,
+                                );
+                                let pos = writeRollingUintNoAlloc(
+                                    (value as Uint8Array).length,
+                                    arr,
+                                    0,
+                                );
+                                arr.set(value as Uint8Array, pos);
+                                writer(arr);
+                            }
+                        } catch (err) {
+                            throw err;
+                        }
+                    })();
+                },
+            ];
+        },
+        async (ctx, hijackReadContext) => {
+            const idHigh = await ctx.readByte();
+            const idLow = await ctx.readByte();
+            const id = (idHigh << 8) | idLow;
+
+            let cleanup: (slurp: boolean) => void;
+            const stream = new ReadableStream<Uint8Array>({
+                start: (controller) => {
+                    cleanup = hijackReadContext(
+                        id,
+                        async (streamCtx) => {
+                            try {
+                                const len =
+                                    await readRollingUintNoAlloc(streamCtx);
+                                if (len === 0) {
+                                    controller.close();
+                                    cleanup(false);
+                                    return;
+                                }
+                                const bytes = await streamCtx.readBytes(len);
+                                controller.enqueue(bytes);
+                            } catch (err) {
+                                controller.error(err);
+                                cleanup(false);
+                            }
+                        },
+                        () => {
+                            controller.error(new OutOfDataError());
+                        },
+                    );
+                },
+                cancel: () => {
+                    cleanup(true);
+                },
+            });
+            return [stream];
+        },
+        new Uint8Array([dataType.readableStream]),
+    );
+}
+
 export function record<S extends Schema<any>>(
     child: S,
     message?: string,
@@ -1132,5 +1222,22 @@ export function map<K, V>(
             ...keySchema.schema,
             ...valueSchema.schema,
         ]),
+    );
+}
+
+export function any(message?: string) {
+    if (!message) message = "Data must be any supported type";
+
+    return base<any>(
+        "any",
+        (data) => {
+            throw new Error("TODO: serialize any type");
+        },
+        async (ctx, hijackReadContext) => {
+            const { reflectByteReprToSchema } = await import("./reflection");
+            const schema = await reflectByteReprToSchema(ctx);
+            return schema.readFromContext(ctx, hijackReadContext);
+        },
+        new Uint8Array([dataType.any]),
     );
 }

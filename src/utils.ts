@@ -30,6 +30,8 @@ export const dataType = {
     // In most languages, treat both as maps
     record: 0x13,
     map: 0x14,
+
+    any: 0x15,
 };
 
 export async function readRollingUintNoAlloc(

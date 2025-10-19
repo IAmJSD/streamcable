@@ -12,6 +12,7 @@ import {
     object,
     optional,
     promise,
+    readableStream,
     record,
     string,
     uint,
@@ -86,7 +87,7 @@ export async function reflectByteReprToSchema(
         case dataType.bigint:
             return bigint();
         case dataType.readableStream:
-            throw new Error("TODO: Implement readableStream schema reflection");
+            return readableStream();
         case dataType.record:
             return record(await reflectByteReprToSchema(ctx));
         case dataType.map:
