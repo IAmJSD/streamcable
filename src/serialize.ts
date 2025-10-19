@@ -132,6 +132,47 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
     }
 }
 
+/**
+ * Serializes data using a schema to either a Node.js Writable stream or browser WritableStream.
+ * Supports both streaming and buffered serialization with automatic schema negotiation.
+ *
+ * The function handles:
+ * - Schema validation and size calculation
+ * - Efficient binary encoding
+ * - Stream management for nested async data (Promises, iterators, etc.)
+ * - Cross-platform compatibility (Node.js vs browser)
+ * - Optimized schema transmission (only sends schema if changed)
+ *
+ * @template S - The schema type
+ * @param schema - Schema defining the structure and validation rules for the data
+ * @param writable - Target stream (Node.js Writable or browser WritableStream)
+ * @param data - Data to serialize, must conform to the schema type
+ * @param lastUpdateHash - Optional hash of the last schema used, for optimization (generally sent from the client)
+ * @returns Promise that resolves when serialization is complete
+ *
+ * @example
+ * ```typescript
+ * // Serialize a user object
+ * const userSchema = object({
+ *   name: string(),
+ *   age: uint(),
+ *   active: boolean()
+ * });
+ *
+ * await serialize(userSchema, writableStream, {
+ *   name: "John",
+ *   age: 30,
+ *   active: true
+ * });
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Serialize with schema optimization
+ * const hash = await getHash(mySchema);
+ * await serialize(mySchema, stream, data, hash);
+ * ```
+ */
 export async function serialize<S extends Schema<any>>(
     schema: S,
     writable: Writable | WritableStream<Uint8Array>,

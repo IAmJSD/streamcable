@@ -6,14 +6,30 @@ const weakHashMap = new WeakMap<Uint8Array, string>();
 /**
  * The output type of a schema. Given a schema `T`, `output<T>` is the type of data
  * that schema represents.
+ *
+ * @template T - A schema type extending Schema<any>
+ *
+ * @example
+ * ```typescript
+ * const userSchema = object({ name: string(), age: uint() });
+ * type User = output<typeof userSchema>; // { name: string; age: number }
+ * ```
  */
 export type output<T extends Schema<any>> =
     T extends Schema<infer R> ? R : never;
 
 /**
- * Gets the hash for a schema.
- * @param schema The schema you wish to hash.
- * @returns The SHA-1 hash of the schema, as a hex string.
+ * Gets the SHA-1 hash for a schema's binary representation.
+ * Results are cached to avoid recomputation for the same schema.
+ *
+ * @param schema - The schema to hash
+ * @returns Promise resolving to the SHA-1 hash as a hex string
+ *
+ * @example
+ * ```typescript
+ * const schema = object({ name: string() });
+ * const hash = await getHash(schema); // "a1b2c3d4e5f6..."
+ * ```
  */
 export async function getHash(schema: Schema<any>) {
     const res = weakHashMap.get(schema.schema);
@@ -30,6 +46,37 @@ export async function getHash(schema: Schema<any>) {
     return hash;
 }
 
+/**
+ * Deserializes data from a stream using the provided schema.
+ * Handles streaming deserialization with support for complex nested data types.
+ *
+ * The function manages:
+ * - Schema negotiation and dynamic schema loading
+ * - Stream coordination for async data (Promises, iterators, etc.)
+ * - Proper resource cleanup and connection management
+ * - Cross-platform stream handling
+ *
+ * @template S - The schema type
+ * @param schema - Schema defining the expected data structure
+ * @param getReader - Function that returns a ReadableStream for the given schema hash and abort signal
+ * @returns Promise resolving to the deserialized data of type output<S>
+ *
+ * @example
+ * ```typescript
+ * const userSchema = object({
+ *   name: string(),
+ *   age: uint(),
+ *   active: boolean()
+ * });
+ *
+ * const user = await deserialize(userSchema, async (hash, signal) => {
+ *   const response = await fetch(`/api/data/${hash}`, { signal });
+ *   return response.body!;
+ * });
+ *
+ * console.log(user); // { name: "John", age: 30, active: true }
+ * ```
+ */
 export async function deserialize<S extends Schema<any>>(
     schema: S,
     getReader: (
