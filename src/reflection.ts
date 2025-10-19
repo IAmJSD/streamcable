@@ -7,6 +7,7 @@ import {
     float,
     int,
     iterator,
+    map,
     nullable,
     object,
     optional,
@@ -89,7 +90,10 @@ export async function reflectByteReprToSchema(
         case dataType.record:
             return record(await reflectByteReprToSchema(ctx));
         case dataType.map:
-            throw new Error("TODO: Implement map schema reflection");
+            return map(
+                await reflectByteReprToSchema(ctx),
+                await reflectByteReprToSchema(ctx),
+            );
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

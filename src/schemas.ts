@@ -1070,3 +1070,67 @@ export function record<S extends Schema<any>>(
         new Uint8Array([dataType.record, ...child.schema]),
     );
 }
+
+export function map<K, V>(
+    keySchema: Schema<K>,
+    valueSchema: Schema<V>,
+    message?: string,
+) {
+    if (!message) message = "Data must be a Map";
+
+    return base<Map<K, V>>(
+        "map",
+        (data) => {
+            if (!(data instanceof Map)) {
+                throw new ValidationError(message);
+            }
+            const writers: ((ctx: WriteContext) => void)[] = [];
+            let size = getRollingUintSize(data.size);
+            for (const [key, value] of data.entries()) {
+                const [keySize, keyWriter] =
+                    keySchema.validateAndMakeWriter(key);
+                const [valueSize, valueWriter] =
+                    valueSchema.validateAndMakeWriter(value);
+                size += keySize + valueSize;
+                writers.push((ctx: WriteContext) => {
+                    keyWriter(ctx);
+                    valueWriter(ctx);
+                });
+            }
+            return [
+                size,
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(
+                        data.size,
+                        ctx.buf,
+                        ctx.pos,
+                    );
+                    for (const writer of writers) {
+                        writer(ctx);
+                    }
+                },
+            ];
+        },
+        async (ctx, hijackReadContext) => {
+            const len = await readRollingUintNoAlloc(ctx);
+            const res = new Map<K, V>();
+            for (let i = 0; i < len; i++) {
+                const keyValue = await keySchema.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
+                const valueValue = await valueSchema.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
+                res.set(keyValue[0], valueValue[0]);
+            }
+            return [res];
+        },
+        new Uint8Array([
+            dataType.map,
+            ...keySchema.schema,
+            ...valueSchema.schema,
+        ]),
+    );
+}
