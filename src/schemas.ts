@@ -577,3 +577,27 @@ export function uint8(message?: string) {
         new Uint8Array([dataType.u8array]),
     );
 }
+
+export function uint(message?: string) {
+    if (!message) message = "Data must be a uint";
+    return base<number>(
+        "uint",
+        (data) => {
+            if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+                throw new ValidationError(message);
+            }
+            return getRollingUintSize(data);
+        },
+        (ctx, data) => {
+            if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+                throw new ValidationError(message);
+            }
+            ctx.pos = writeRollingUintNoAlloc(data, ctx.buf, ctx.pos);
+        },
+        async (ctx) => {
+            const value = await readRollingUintNoAlloc(ctx);
+            return [value];
+        },
+        new Uint8Array([dataType.u8array]),
+    );
+}
