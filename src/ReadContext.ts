@@ -1,3 +1,6 @@
+/**
+ * The error thrown when attempting to read past the end of the stream.
+ */
 export class OutOfDataError extends Error {
     constructor() {
         super("Attempt to read past end of stream");

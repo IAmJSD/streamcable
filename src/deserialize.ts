@@ -3,9 +3,18 @@ import { ReadContext, OutOfDataError } from "./ReadContext";
 
 const weakHashMap = new WeakMap<Uint8Array, string>();
 
+/**
+ * The output type of a schema. Given a schema `T`, `output<T>` is the type of data
+ * that schema represents.
+ */
 export type output<T extends Schema<any>> =
     T extends Schema<infer R> ? R : never;
 
+/**
+ * Gets the hash for a schema.
+ * @param schema The schema you wish to hash.
+ * @returns The SHA-1 hash of the schema, as a hex string.
+ */
 export async function getHash(schema: Schema<any>) {
     const res = weakHashMap.get(schema.schema);
     if (res) return res;

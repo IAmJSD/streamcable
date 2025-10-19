@@ -31,6 +31,12 @@ function base<T>(
     } as const;
 }
 
+/**
+ * Core schema type that defines how data of type T should be serialized and deserialized.
+ * All schema functions return this type, providing validation, serialization, and deserialization capabilities.
+ *
+ * @template T - The TypeScript type that this schema validates and handles
+ */
 export type Schema<T> = ReturnType<typeof base<T>>;
 
 function getRollingUintSize(data: number) {
@@ -60,6 +66,20 @@ function getEncodedLenNoAlloc(t: string) {
     return len;
 }
 
+/**
+ * Creates a schema that transforms input data before validation and serialization.
+ * Useful for preprocessing data or applying transformations while maintaining type safety.
+ *
+ * @template T - The type handled by both the source schema and transformation
+ * @param from - The base schema to use for validation and serialization
+ * @param into - Transformation function applied to data before validation
+ * @returns A new schema that applies the transformation before processing
+ *
+ * @example
+ * ```typescript
+ * const trimmedString = pipe(string(), (str) => str.trim());
+ * ```
+ */
 export function pipe<T>(from: Schema<T>, into: (data: T) => T): Schema<T> {
     return {
         name: "pipe",
@@ -74,6 +94,10 @@ export function pipe<T>(from: Schema<T>, into: (data: T) => T): Schema<T> {
     } as const;
 }
 
+/**
+ * Error thrown when data validation fails during schema processing.
+ * Contains a descriptive message about what validation rule was violated.
+ */
 export class ValidationError extends Error {
     constructor(message: string) {
         super(message);
@@ -114,6 +138,21 @@ function writeRollingUintNoAlloc(data: number, u8a: Uint8Array, pos: number) {
     return pos + 9;
 }
 
+/**
+ * Creates a schema for arrays containing elements of a specific type.
+ * Validates that data is an array and that all elements conform to the element schema.
+ *
+ * @template T - The type of elements in the array
+ * @param elements - Schema defining the structure of array elements
+ * @param message - Optional custom validation error message
+ * @returns Schema for arrays of type T[]
+ *
+ * @example
+ * ```typescript
+ * const numberArray = array(uint());
+ * const stringArray = array(string());
+ * ```
+ */
 export function array<T>(elements: Schema<T>, message?: string) {
     if (!message) message = "Data must be an array";
 
@@ -160,12 +199,35 @@ export function array<T>(elements: Schema<T>, message?: string) {
     );
 }
 
+/**
+ * Type definition for object schemas - a mapping from string keys to schema definitions.
+ * Used as input to the object() schema function to define object structure.
+ */
 export type ObjectSchemas = {
     [key: string]: Schema<any>;
 };
 
 const te = new TextEncoder();
 
+/**
+ * Creates a schema for objects with predefined properties and their schemas.
+ * Validates that data is an object and that all properties conform to their defined schemas.
+ * Properties are processed in alphabetical order for consistent serialization.
+ *
+ * @template T - Object schema definition mapping property names to schemas
+ * @param schemas - Object defining the schema for each property
+ * @param message - Optional custom validation error message
+ * @returns Schema for objects with the specified structure
+ *
+ * @example
+ * ```typescript
+ * const userSchema = object({
+ *   name: string(),
+ *   age: uint(),
+ *   email: optional(string())
+ * });
+ * ```
+ */
 export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
     if (!message) message = "Data must be an object";
 
@@ -246,6 +308,18 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
 
 const td = new TextDecoder();
 
+/**
+ * Creates a schema for UTF-8 encoded strings.
+ * Validates that data is a string and handles efficient UTF-8 encoding/decoding.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for string values
+ *
+ * @example
+ * ```typescript
+ * const nameSchema = string("Name must be a string");
+ * ```
+ */
 export function string(message?: string) {
     if (!message) message = "Data must be a string";
     return base<string>(
@@ -275,6 +349,18 @@ export function string(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for Uint8Array binary data.
+ * Validates that data is a Uint8Array and handles efficient binary serialization.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for Uint8Array values
+ *
+ * @example
+ * ```typescript
+ * const binaryData = uint8array("Expected binary data");
+ * ```
+ */
 export function uint8array(message?: string) {
     if (!message) message = "Data must be a Uint8Array";
     return base<Uint8Array>(
@@ -302,6 +388,19 @@ export function uint8array(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for Node.js Buffer objects.
+ * Validates that data is a Buffer and handles efficient binary serialization.
+ * Note: This is Node.js specific and may not work in browser environments.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for Buffer values
+ *
+ * @example
+ * ```typescript
+ * const fileData = buffer("Expected buffer data");
+ * ```
+ */
 export function buffer(message?: string) {
     if (!message) message = "Data must be a Buffer";
     return base<Buffer>(
@@ -328,6 +427,13 @@ export function buffer(message?: string) {
     );
 }
 
+/**
+ * Special error class for errors that can be serialized across the stream.
+ * Contains both the schema definition and the error data, allowing the error
+ * to be reconstructed on the receiving side.
+ *
+ * @template T - The type of the error data
+ */
 export class SerializableError<T> extends Error {
     constructor(
         public schema: Schema<T>,
@@ -338,6 +444,22 @@ export class SerializableError<T> extends Error {
     }
 }
 
+/**
+ * Creates a schema for Promise objects that resolve to a specific type.
+ * Handles asynchronous data by creating a stream for the promise resolution.
+ * Supports both successful resolution and SerializableError rejection.
+ *
+ * @template T - The type that the promise resolves to
+ * @param inner - Schema for the resolved value
+ * @param message - Optional custom validation error message
+ * @returns Schema for Promise<T> values
+ *
+ * @example
+ * ```typescript
+ * const asyncString = promise(string());
+ * const asyncUser = promise(object({ name: string(), age: uint() }));
+ * ```
+ */
 export function promise<T>(inner: Schema<T>, message?: string) {
     if (!message) message = "Data must be a Promise";
 
@@ -465,6 +587,22 @@ export function promise<T>(inner: Schema<T>, message?: string) {
 
 const done_ = Symbol("done");
 
+/**
+ * Creates a schema for iterables (both sync and async) that yield elements of a specific type.
+ * Handles streaming of iterable data, supporting both Iterable<T> and AsyncIterable<T>.
+ * The iterator is consumed lazily and elements are streamed as they become available.
+ *
+ * @template T - The type of elements yielded by the iterator
+ * @param elements - Schema for individual elements
+ * @param message - Optional custom validation error message
+ * @returns Schema for Iterable<T> or AsyncIterable<T> values
+ *
+ * @example
+ * ```typescript
+ * const numberStream = iterator(uint());
+ * const stringStream = iterator(string());
+ * ```
+ */
 export function iterator<T>(elements: Schema<T>, message?: string) {
     if (!message) message = "Data must be an iterator";
 
@@ -615,6 +753,18 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
     );
 }
 
+/**
+ * Creates a schema for boolean values (true/false).
+ * Validates that data is a boolean and encodes it efficiently as a single byte.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for boolean values
+ *
+ * @example
+ * ```typescript
+ * const isActive = boolean("Must be true or false");
+ * ```
+ */
 export function boolean(message?: string) {
     if (!message) message = "Data must be a boolean";
     return base<boolean>(
@@ -639,6 +789,18 @@ export function boolean(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for unsigned 8-bit integers (0-255).
+ * Validates that data is an integer within the uint8 range and encodes it as a single byte.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for uint8 values
+ *
+ * @example
+ * ```typescript
+ * const colorComponent = uint8("Color component must be 0-255");
+ * ```
+ */
 export function uint8(message?: string) {
     if (!message) message = "Data must be a uint8";
     return base<number>(
@@ -668,6 +830,20 @@ export function uint8(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for unsigned integers (non-negative integers).
+ * Uses variable-length encoding to efficiently store small numbers in fewer bytes.
+ * Supports values from 0 to 2^53-1 (JavaScript's safe integer limit).
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for unsigned integer values
+ *
+ * @example
+ * ```typescript
+ * const count = uint("Count must be a non-negative integer");
+ * const id = uint();
+ * ```
+ */
 export function uint(message?: string) {
     if (!message) message = "Data must be a uint";
     return base<number>(
@@ -695,6 +871,26 @@ export function uint(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for union types that can match one of several possible schemas.
+ * Attempts to validate against each schema in order until one succeeds.
+ * The first matching schema is used for serialization/deserialization.
+ *
+ * @template Schema1 - The first schema type
+ * @template OtherSchemas - Array of additional schema types
+ * @param first - The first schema to try
+ * @param others - Additional schemas to try if the first fails
+ * @returns Schema for union of all provided schema types
+ *
+ * @example
+ * ```typescript
+ * const stringOrNumber = union(string(), uint());
+ * const result = union(
+ *   object({ type: "user", name: string() }),
+ *   object({ type: "admin", permissions: array(string()) })
+ * );
+ * ```
+ */
 export function union<
     Schema1 extends Schema<any>,
     OtherSchemas extends Schema<any>[],
@@ -768,6 +964,20 @@ export function union<
     );
 }
 
+/**
+ * Creates a schema for Date objects.
+ * Validates that data is a Date instance and serializes it as an ISO string.
+ * Preserves full date/time precision including milliseconds and timezone.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for Date values
+ *
+ * @example
+ * ```typescript
+ * const timestamp = date("Expected a valid date");
+ * const createdAt = date();
+ * ```
+ */
 export function date(message?: string) {
     if (!message) message = "Data must be a Date";
 
@@ -799,6 +1009,20 @@ export function date(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for signed integers (positive and negative integers).
+ * Uses zigzag encoding to efficiently represent both positive and negative numbers.
+ * Supports the full range of JavaScript safe integers.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for signed integer values
+ *
+ * @example
+ * ```typescript
+ * const temperature = int("Temperature must be an integer");
+ * const delta = int();
+ * ```
+ */
 export function int(message?: string) {
     if (!message) message = "Data must be an int";
     return base<number>(
@@ -830,6 +1054,20 @@ export function int(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for floating-point numbers (including integers as floats).
+ * Uses IEEE 754 double precision (64-bit) encoding for full precision.
+ * Accepts any JavaScript number including Infinity, -Infinity, and NaN.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for floating-point number values
+ *
+ * @example
+ * ```typescript
+ * const price = float("Price must be a number");
+ * const ratio = float();
+ * ```
+ */
 export function float(message?: string) {
     if (!message) message = "Data must be a float";
     return base<number>(
@@ -861,6 +1099,21 @@ export function float(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for nullable values (T | null).
+ * If no inner schema is provided, only accepts null values.
+ * If an inner schema is provided, accepts either null or values matching the inner schema.
+ *
+ * @template T - The type of non-null values (defaults to null if no inner schema)
+ * @param inner - Optional schema for non-null values
+ * @returns Schema for T | null values
+ *
+ * @example
+ * ```typescript
+ * const optionalString = nullable(string());
+ * const nullOnly = nullable(); // Only accepts null
+ * ```
+ */
 export function nullable<T = null>(inner?: Schema<T>) {
     return base<T | null>(
         "nullable",
@@ -914,6 +1167,21 @@ export function nullable<T = null>(inner?: Schema<T>) {
     );
 }
 
+/**
+ * Creates a schema for optional values (T | undefined).
+ * Accepts either undefined or values matching the inner schema.
+ * Useful for object properties that may not be present.
+ *
+ * @template T - The type of defined values
+ * @param inner - Schema for defined values
+ * @returns Schema for T | undefined values
+ *
+ * @example
+ * ```typescript
+ * const optionalAge = optional(uint());
+ * const maybeEmail = optional(string());
+ * ```
+ */
 export function optional<T>(inner: Schema<T>) {
     return base<T | undefined>(
         "optional",
@@ -955,6 +1223,20 @@ export function optional<T>(inner: Schema<T>) {
     );
 }
 
+/**
+ * Creates a schema for BigInt values.
+ * Validates that data is a bigint and serializes it as a 64-bit unsigned integer.
+ * Supports values from 0 to 2^64-1.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for bigint values
+ *
+ * @example
+ * ```typescript
+ * const largeNumber = bigint("Expected a bigint value");
+ * const id = bigint();
+ * ```
+ */
 export function bigint(message?: string) {
     if (!message) message = "Data must be a bigint";
     return base<bigint>(
@@ -986,6 +1268,20 @@ export function bigint(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for ReadableStream<Uint8Array> objects.
+ * Handles streaming binary data by creating a stream channel for the readable stream.
+ * The stream is consumed and its chunks are forwarded through the serialization channel.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for ReadableStream<Uint8Array> values
+ *
+ * @example
+ * ```typescript
+ * const fileStream = readableStream("Expected a readable stream");
+ * const dataStream = readableStream();
+ * ```
+ */
 export function readableStream(message?: string) {
     if (!message) message = "Data must be a ReadableStream";
 
@@ -1076,6 +1372,22 @@ export function readableStream(message?: string) {
     );
 }
 
+/**
+ * Creates a schema for record objects (objects with string keys and values of a specific type).
+ * Similar to object() but for dynamic key-value pairs where all values have the same schema.
+ * Only includes enumerable own properties of the object.
+ *
+ * @template S - The schema type for values
+ * @param child - Schema for all values in the record
+ * @param message - Optional custom validation error message
+ * @returns Schema for Record<string, T> where T is the output type of the child schema
+ *
+ * @example
+ * ```typescript
+ * const userScores = record(uint()); // Record<string, number>
+ * const metadata = record(string()); // Record<string, string>
+ * ```
+ */
 export function record<S extends Schema<any>>(
     child: S,
     message?: string,
@@ -1151,6 +1463,24 @@ export function record<S extends Schema<any>>(
     );
 }
 
+/**
+ * Creates a schema for Map objects with specific key and value types.
+ * Validates that data is a Map instance and that all entries conform to their respective schemas.
+ * Preserves the Map structure and iteration order.
+ *
+ * @template K - The type of map keys
+ * @template V - The type of map values
+ * @param keySchema - Schema for map keys
+ * @param valueSchema - Schema for map values
+ * @param message - Optional custom validation error message
+ * @returns Schema for Map<K, V> values
+ *
+ * @example
+ * ```typescript
+ * const userAges = map(string(), uint()); // Map<string, number>
+ * const coordinates = map(string(), float()); // Map<string, number>
+ * ```
+ */
 export function map<K, V>(
     keySchema: Schema<K>,
     valueSchema: Schema<V>,
@@ -1325,6 +1655,23 @@ function reflectDataToSchema(data: any): Schema<any> {
     }
 }
 
+/**
+ * Creates a schema that accepts any supported data type.
+ * Uses runtime reflection to determine the appropriate schema for the given data.
+ * Dynamically creates the correct schema based on the data's type and structure.
+ *
+ * Warning: This schema has higher overhead due to runtime type reflection.
+ * Consider using specific schemas when the data type is known in advance.
+ *
+ * @param message - Optional custom validation error message
+ * @returns Schema for any supported value type
+ *
+ * @example
+ * ```typescript
+ * const dynamicData = any("Data must be a supported type");
+ * const flexible = any(); // Accepts any supported type
+ * ```
+ */
 export function any(message?: string) {
     if (!message) message = "Data must be any supported type";
 
