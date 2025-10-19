@@ -1,6 +1,8 @@
-import type { ReadContext } from "./schemas";
+import { nullable, type ReadContext } from "./schemas";
 
 export const dataType = {
+    // 0x00 is reserved
+
     array: 0x01,
     object: 0x02,
     string: 0x03,
@@ -19,6 +21,7 @@ export const dataType = {
     date: 0x0c,
     int: 0x0d,
     float: 0x0e,
+    nullable: 0x0f,
 };
 
 export async function readRollingUintNoAlloc(

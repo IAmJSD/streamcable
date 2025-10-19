@@ -6,6 +6,7 @@ import {
     float,
     int,
     iterator,
+    nullable,
     object,
     promise,
     string,
@@ -68,6 +69,14 @@ export async function reflectByteReprToSchema(
             return int();
         case dataType.float:
             return float();
+        case dataType.nullable: {
+            const next = await ctx.peekByte();
+            if (next === 0x00) {
+                // No child
+                return nullable();
+            }
+            return nullable(await reflectByteReprToSchema(ctx));
+        }
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

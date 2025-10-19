@@ -13,6 +13,7 @@ export type WriteContext = {
 
 export type ReadContext = {
     readByte: () => Promise<number>;
+    peekByte: () => Promise<number>;
     readBytes: (length: number) => Promise<Uint8Array>;
 };
 
@@ -866,5 +867,58 @@ export function float(message?: string) {
             return [value];
         },
         new Uint8Array([dataType.float]),
+    );
+}
+
+export function nullable<T = null>(inner?: Schema<T>) {
+    return base<T | null>(
+        "nullable",
+        (data) => {
+            if (data === null) {
+                return [
+                    1,
+                    (ctx: WriteContext) => {
+                        ctx.buf[ctx.pos] = 0;
+                        ctx.pos += 1;
+                    },
+                ];
+            }
+            if (!inner) {
+                throw new ValidationError(
+                    "Data must be null (no inner schema provided)",
+                );
+            }
+            const [size, writer] = inner.validateAndMakeWriter(data);
+            return [
+                1 + size,
+                (ctx: WriteContext) => {
+                    ctx.buf[ctx.pos] = 1;
+                    ctx.pos += 1;
+                    writer(ctx);
+                },
+            ];
+        },
+        async (ctx, hijackReadContext) => {
+            const flag = await ctx.readByte();
+            if (flag === 0) {
+                return [null];
+            }
+            if (flag === 1) {
+                if (!inner) {
+                    throw new Error(
+                        "internal: No inner schema provided for nullable",
+                    );
+                }
+                const value = await inner.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                );
+                return value as [T];
+            }
+            throw new Error("internal: Invalid nullable flag");
+        },
+        inner
+            ? new Uint8Array([dataType.nullable, ...inner.schema])
+            : new Uint8Array([dataType.nullable, 0x00]), // special case because we need to know if no schema
     );
 }

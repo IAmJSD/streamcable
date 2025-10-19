@@ -52,6 +52,35 @@ export class ReadContext {
         return slice[0];
     }
 
+    async peekByte(): Promise<number> {
+        for (;;) {
+            if (this._slices.length) {
+                const slice = this._slices[0];
+                if (slice === null) {
+                    throw new OutOfDataError();
+                }
+                if (this._pos < slice.length) {
+                    return slice[this._pos];
+                } else {
+                    this._slices.shift();
+                    this._pos = 0;
+                }
+            } else {
+                break;
+            }
+        }
+
+        const slice = await this._promise;
+        if (slice === null) {
+            throw new OutOfDataError();
+        }
+        this._pos = 0;
+        if (slice[0] === undefined) {
+            throw new OutOfDataError();
+        }
+        return slice[0];
+    }
+
     async readBytes(len: number): Promise<Uint8Array> {
         const result = new Uint8Array(len);
         let offset = 0;
