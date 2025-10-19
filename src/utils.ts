@@ -15,6 +15,7 @@ export const dataType = {
     boolean: 0x08,
     uint8: 0x09,
     uint: 0x0a,
+    union: 0x0b,
 };
 
 export async function readRollingUintNoAlloc(ctx: ReadContext): Promise<number> {

@@ -35,7 +35,8 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
     if (!lastUpdateIsUs) {
         size += schema.schema.length;
     }
-    size += schema.calculateSize(data);
+    const [valueSize, writeData] = schema.validateAndMakeWriter(data);
+    size += valueSize;
 
     // Create a buffer of that size and write the header.
     const buffer = new Uint8Array(size);
@@ -96,7 +97,7 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
         pos: 1 + (lastUpdateIsUs ? 0 : schema.schema.length),
         createWriteStream,
     };
-    schema.writeIntoContext(baseCtx, data);
+    writeData(baseCtx);
 
     // Write the buffer.
     await writer.write(buffer);
@@ -149,7 +150,8 @@ export async function serialize<S extends Schema<any>>(
     if (!lastUpdateIsUs) {
         size += schema.schema.length;
     }
-    size += schema.calculateSize(data);
+    const [valueSize, writeData] = schema.validateAndMakeWriter(data);
+    size += valueSize;
 
     // Create a buffer of that size and write the header.
     const buffer = Buffer.allocUnsafe(size);
@@ -210,7 +212,7 @@ export async function serialize<S extends Schema<any>>(
         pos: 1 + (lastUpdateIsUs ? 0 : schema.schema.length),
         createWriteStream,
     };
-    schema.writeIntoContext(baseCtx, data);
+    writeData(baseCtx);
 
     // Write the buffer.
     await new Promise<void>((resolve, reject) => {

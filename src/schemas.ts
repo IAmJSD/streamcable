@@ -18,8 +18,10 @@ export type ReadContext = {
 
 function base<T>(
     name: string,
-    calculateSize: (data: unknown) => number,
-    writeIntoContext: (ctx: WriteContext, data: T) => void,
+    validateAndMakeWriter: (data: unknown) => [
+        number,
+        (ctx: WriteContext) => void,
+    ],
     readFromContext: (
         ctx: ReadContext,
         hijackReadContext: (
@@ -32,8 +34,7 @@ function base<T>(
 ) {
     return {
         name,
-        calculateSize,
-        writeIntoContext,
+        validateAndMakeWriter,
         readFromContext,
         schema,
     } as const;
@@ -74,9 +75,11 @@ export function pipe<T>(
 ): Schema<T> {
     return {
         name: "pipe",
-        calculateSize: from.calculateSize,
-        writeIntoContext: (ctx, data) => {
-            from.writeIntoContext(ctx, into(data));
+        validateAndMakeWriter: (data) => {
+            // Run at the beginning to make sure the type is correct before
+            from.validateAndMakeWriter(data);
+            data = into(data as T);
+            return from.validateAndMakeWriter(data);
         },
         readFromContext: from.readFromContext,
         schema: from.schema,
@@ -133,17 +136,18 @@ export function array<T>(elements: Schema<T>, message?: string) {
         (data) => {
             if (!Array.isArray(data)) throw new ValidationError(message);
             let size = getRollingUintSize(data.length);
+            const writers: ((ctx: WriteContext) => void)[] = [];
             for (const item of data) {
-                size += elements.calculateSize(item);
+                const [s, writer] = elements.validateAndMakeWriter(item);
+                size += s;
+                writers.push(writer);
             }
-            return size;
-        },
-        (ctx, data) => {
-            if (!Array.isArray(data)) throw new ValidationError(message);
-            ctx.pos = writeRollingUintNoAlloc(data.length, ctx.buf, ctx.pos);
-            for (const item of data) {
-                elements.writeIntoContext(ctx, item);
-            }
+            return [size, (ctx: WriteContext) => {
+                ctx.pos = writeRollingUintNoAlloc(data.length, ctx.buf, ctx.pos);
+                for (const writer of writers) {
+                    writer(ctx);
+                }
+            }];
         },
         async (ctx, hijackReadContext) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -206,18 +210,17 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
                 throw new ValidationError(message);
             }
             let size = 0;
+            const writers: ((ctx: WriteContext) => void)[] = [];
             for (const key of keys) {
-                size += schemas[key].calculateSize((data as any)[key]);
+                const [s, writer] = schemas[key].validateAndMakeWriter((data as any)[key]);
+                size += s;
+                writers.push(writer);
             }
-            return size;
-        },
-        (ctx, data) => {
-            if (typeof data !== "object" || data === null || Array.isArray(data)) {
-                throw new ValidationError(message);
-            }
-            for (const key of keys) {
-                schemas[key].writeIntoContext(ctx, (data as any)[key]);
-            }
+            return [size, (ctx: WriteContext) => {
+                for (const writer of writers) {
+                    writer(ctx);
+                }
+            }];
         },
         async (ctx, hijackReadContext) => {
             const res: any = {};
@@ -240,14 +243,11 @@ export function string(message?: string) {
         (data) => {
             if (typeof data !== "string") throw new ValidationError(message);
             const len = getEncodedLenNoAlloc(data);
-            return getRollingUintSize(len) + len;
-        },
-        (ctx, data) => {
-            if (typeof data !== "string") throw new ValidationError(message);
-            const len = getEncodedLenNoAlloc(data);
-            ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
-            te.encodeInto(data, ctx.buf.subarray(ctx.pos, ctx.pos + len));
-            ctx.pos += len;
+            return [getRollingUintSize(len) + len, (ctx: WriteContext) => {
+                ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                te.encodeInto(data, ctx.buf.subarray(ctx.pos, ctx.pos + len));
+                ctx.pos += len;
+            }];
         },
         async (ctx) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -266,14 +266,12 @@ export function uint8array(message?: string) {
         (data) => {
             if (!(data instanceof Uint8Array)) throw new ValidationError(message);
             const len = data.length;
-            return getRollingUintSize(len) + len;
-        },
-        (ctx, data) => {
-            if (!(data instanceof Uint8Array)) throw new ValidationError(message);
-            const len = data.length;
-            ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
-            ctx.buf.set(data, ctx.pos);
-            ctx.pos += len;
+            return [getRollingUintSize(len) + len, (ctx: WriteContext) => {
+                const len = data.length;
+                ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                ctx.buf.set(data, ctx.pos);
+                ctx.pos += len;
+            }];
         },
         async (ctx) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -291,14 +289,12 @@ export function buffer(message?: string) {
         (data) => {
             if (!Buffer.isBuffer(data)) throw new ValidationError(message);
             const len = data.length;
-            return getRollingUintSize(len) + len;
-        },
-        (ctx, data) => {
-            if (!Buffer.isBuffer(data)) throw new ValidationError(message);
-            const len = data.length;
-            ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
-            ctx.buf.set(data, ctx.pos);
-            ctx.pos += len;
+            return [getRollingUintSize(len) + len, (ctx: WriteContext) => {
+                const len = data.length;
+                ctx.pos = writeRollingUintNoAlloc(len, ctx.buf, ctx.pos);
+                ctx.buf.set(data, ctx.pos);
+                ctx.pos += len;
+            }];
         },
         async (ctx) => {
             const len = await readRollingUintNoAlloc(ctx);
@@ -323,45 +319,48 @@ export function promise<T>(inner: Schema<T>, message?: string) {
 
     return base<Promise<T>>(
         "promise",
-        () => 2, // 2 for the stream pointer
-        (ctx, data) => {
+        (data) => {
             if (!(data instanceof Promise)) throw new ValidationError(message);
-            const [id, writer] = ctx.createWriteStream();
-            ctx.buf[ctx.pos] = (id >> 8) & 0xff;
-            ctx.buf[ctx.pos + 1] = id & 0xff;
-            ctx.pos += 2;
-            data.then((value) => {
-                const size = inner.calculateSize(value);
-                const buf = new Uint8Array(1 + size); // 1 byte for success flag
-                buf[0] = 1; // success
-                const writeCtx: WriteContext = {
-                    buf,
-                    pos: 1,
-                    createWriteStream: ctx.createWriteStream,
-                };
-                inner.writeIntoContext(writeCtx, value);
-                writer(buf);
-                writer(null);
-            }).catch((err) => {
-                if (err instanceof SerializableError) {
-                    // Get the size of the serialized error data
-                    const size = err.schema.calculateSize(err.data);
-                    const buf = new Uint8Array(1 + err.schema.schema.length + size);
-                    buf[0] = 0; // failure
-                    buf.set(err.schema.schema, 1);
+    
+            return [2, (ctx: WriteContext) => {
+                const [id, writer] = ctx.createWriteStream();
+                ctx.buf[ctx.pos] = (id >> 8) & 0xff;
+                ctx.buf[ctx.pos + 1] = id & 0xff;
+                ctx.pos += 2;
+                const scratch: any[] = [];
+                data.then((value) => {
+                    const [size, ctxWriter] = inner.validateAndMakeWriter(value);
+                    const buf = new Uint8Array(1 + size); // 1 byte for success flag
+                    buf[0] = 1; // success
                     const writeCtx: WriteContext = {
                         buf,
-                        pos: 1 + err.schema.schema.length,
+                        pos: 1,
                         createWriteStream: ctx.createWriteStream,
                     };
-                    err.schema.writeIntoContext(writeCtx, err.data);
+                    ctxWriter(writeCtx);
                     writer(buf);
                     writer(null);
-                    return;
-                }
+                }).catch((err) => {
+                    if (err instanceof SerializableError) {
+                        // Get the size of the serialized error data
+                        const [size, ctxWriter] = err.schema.validateAndMakeWriter(err.data);
+                        const buf = new Uint8Array(1 + err.schema.schema.length + size);
+                        buf[0] = 0; // failure
+                        buf.set(err.schema.schema, 1);
+                        const writeCtx: WriteContext = {
+                            buf,
+                            pos: 1 + err.schema.schema.length,
+                            createWriteStream: ctx.createWriteStream,
+                        };
+                        ctxWriter(writeCtx);
+                        writer(buf);
+                        writer(null);
+                        return;
+                    }
 
-                throw err;
-            });
+                    throw err;
+                });
+            }];
         },
         async (ctx, hijackReadContext) => {
             const idHigh = await ctx.readByte();
@@ -418,53 +417,54 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
 
     return base<Iterable<T> | AsyncIterable<T>>(
         "iterator",
-        () => 2, // 2 for the stream pointer
-        (ctx, data) => {
+        (data) => {
             if (typeof data !== "object" || data === null || (!(data as any)[Symbol.iterator] && !(data as any)[Symbol.asyncIterator])) {
                 throw new ValidationError(message);
             }
-            const [id, writer] = ctx.createWriteStream();
-            ctx.buf[ctx.pos] = (id >> 8) & 0xff;
-            ctx.buf[ctx.pos + 1] = id & 0xff;
-            ctx.pos += 2;
-            (async () => {
-                try {
-                    for await (const item of data as any) {
-                        const size = elements.calculateSize(item);
-                        const buf = new Uint8Array(1 + size); // 1 byte for continuation flag
-                        buf[0] = 1; // continuation
-                        const writeCtx: WriteContext = {
-                            buf,
-                            pos: 1,
-                            createWriteStream: ctx.createWriteStream,
-                        };
-                        elements.writeIntoContext(writeCtx, item);
-                        writer(buf);
-                    }
-                    const buf = new Uint8Array(1);
-                    writer(buf);
-                    writer(null);
-                } catch (err) {
-                    if (err instanceof SerializableError) {
-                        // Get the size of the serialized error data
-                        const size = err.schema.calculateSize(err.data);
-                        const buf = new Uint8Array(1 + err.schema.schema.length + size);
-                        buf[0] = 2; // error flag
-                        buf.set(err.schema.schema, 1);
-                        const writeCtx: WriteContext = {
-                            buf,
-                            pos: 1 + err.schema.schema.length,
-                            createWriteStream: ctx.createWriteStream,
-                        };
-                        err.schema.writeIntoContext(writeCtx, err.data);
+            return [2, (ctx: WriteContext) => {
+                const [id, writer] = ctx.createWriteStream();
+                ctx.buf[ctx.pos] = (id >> 8) & 0xff;
+                ctx.buf[ctx.pos + 1] = id & 0xff;
+                ctx.pos += 2;
+                (async () => {
+                    try {
+                        for await (const item of data as any) {
+                            const [size, ctxWriter] = elements.validateAndMakeWriter(item);
+                            const buf = new Uint8Array(1 + size); // 1 byte for continuation flag
+                            buf[0] = 1; // continuation
+                            const writeCtx: WriteContext = {
+                                buf,
+                                pos: 1,
+                                createWriteStream: ctx.createWriteStream,
+                            };
+                            ctxWriter(writeCtx);
+                            writer(buf);
+                        }
+                        const buf = new Uint8Array(1);
                         writer(buf);
                         writer(null);
-                        return;
-                    }
+                    } catch (err) {
+                        if (err instanceof SerializableError) {
+                            // Get the size of the serialized error data
+                            const [size, ctxWriter] = err.schema.validateAndMakeWriter(err.data);
+                            const buf = new Uint8Array(1 + err.schema.schema.length + size);
+                            buf[0] = 2; // error flag
+                            buf.set(err.schema.schema, 1);
+                            const writeCtx: WriteContext = {
+                                buf,
+                                pos: 1 + err.schema.schema.length,
+                                createWriteStream: ctx.createWriteStream,
+                            };
+                            ctxWriter(writeCtx);
+                            writer(buf);
+                            writer(null);
+                            return;
+                        }
 
-                    throw err;
-                }
-            })();
+                        throw err;
+                    }
+                })();
+            }];
         },
         async (ctx, hijackReadContext) => {
             const idHigh = await ctx.readByte();
@@ -536,12 +536,10 @@ export function boolean(message?: string) {
         "boolean",
         (data) => {
             if (typeof data !== "boolean") throw new ValidationError(message);
-            return 1;
-        },
-        (ctx, data) => {
-            if (typeof data !== "boolean") throw new ValidationError(message);
-            ctx.buf[ctx.pos] = data ? 1 : 0;
-            ctx.pos += 1;
+            return [1, (ctx: WriteContext) => {
+                ctx.buf[ctx.pos] = data ? 1 : 0;
+                ctx.pos += 1;
+            }];
         },
         async (ctx) => {
             const byte = await ctx.readByte();
@@ -561,14 +559,13 @@ export function uint8(message?: string) {
             if (typeof data !== "number" || !Number.isInteger(data) || data < 0 || data > 255) {
                 throw new ValidationError(message);
             }
-            return 1;
-        },
-        (ctx, data) => {
-            if (typeof data !== "number" || !Number.isInteger(data) || data < 0 || data > 255) {
-                throw new ValidationError(message);
-            }
-            ctx.buf[ctx.pos] = data;
-            ctx.pos += 1;
+            return [
+                1,
+                (ctx: WriteContext) => {
+                    ctx.buf[ctx.pos] = data;
+                    ctx.pos += 1;
+                },
+            ]
         },
         async (ctx) => {
             const byte = await ctx.readByte();
@@ -586,18 +583,90 @@ export function uint(message?: string) {
             if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
                 throw new ValidationError(message);
             }
-            return getRollingUintSize(data);
-        },
-        (ctx, data) => {
-            if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
-                throw new ValidationError(message);
-            }
-            ctx.pos = writeRollingUintNoAlloc(data, ctx.buf, ctx.pos);
+            return [
+                getRollingUintSize(data),
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(data, ctx.buf, ctx.pos);
+                },
+            ]
         },
         async (ctx) => {
             const value = await readRollingUintNoAlloc(ctx);
             return [value];
         },
         new Uint8Array([dataType.uint]),
+    );
+}
+
+export function union<
+    Schema1 extends Schema<any>,
+    OtherSchemas extends Schema<any>[],
+>(
+    first: Schema1,
+    ...others: OtherSchemas
+) {
+    others.unshift(first);
+
+    let schemaLen = 1 + getRollingUintSize(others.length - 1); // 1 byte for dataType, plus index size
+    for (const sch of others) {
+        schemaLen += sch.schema.length;
+    }
+
+    const schema = new Uint8Array(schemaLen);
+    schema[0] = dataType.union;
+    let pos = writeRollingUintNoAlloc(others.length - 1, schema, 1);
+    for (const sch of others) {
+        schema.set(sch.schema, pos);
+        pos += sch.schema.length;
+    }
+
+    return base<
+        Schema1 extends Schema<infer U1>
+            ? OtherSchemas extends Schema<infer U2>[]
+                ? U1 | U2
+                : never
+            : never
+    >(
+        "union",
+        (data) => {
+            const errors: ValidationError[] = [];
+            let writer: [number, (ctx: WriteContext) => void] | null = null;
+            let idx = -1;
+            for (let i = 0; i < others.length; i++) {
+                try {
+                    writer = others[i].validateAndMakeWriter(data);
+                    idx = i;
+                    break;
+                } catch (err) {
+                    if (err instanceof ValidationError) {
+                        errors.push(err);
+                    } else {
+                        throw err;
+                    }
+                }
+            }
+            if (!writer) {
+                // If we reach here, none matched.
+                throw new ValidationError(
+                    `Data did not match any schema in union: ${errors.map((e) => e.message).join("; ")}`,
+                );
+            }
+            return [
+                getRollingUintSize(idx) + writer[0],
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(idx, ctx.buf, ctx.pos);
+                    writer![1](ctx);
+                }
+            ];
+        },
+        async (ctx, hijackReadContext) => {
+            const index = await readRollingUintNoAlloc(ctx);
+            if (index < 0 || index >= others.length) {
+                throw new Error("internal: Invalid union schema index");
+            }
+            const value = await others[index].readFromContext(ctx, hijackReadContext);
+            return value as any;
+        },
+        schema,
     );
 }
