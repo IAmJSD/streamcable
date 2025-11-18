@@ -8,7 +8,7 @@ use crate::rolling_uint::{get_rolling_uint_size, write_rolling_uint_no_alloc};
 use std::collections::HashMap;
 
 /// Value type that can be serialized
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// Boolean value
     Boolean(bool),

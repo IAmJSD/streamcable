@@ -84,6 +84,7 @@ pub async fn read_rolling_uint<R: AsyncRead + Unpin>(
 }
 
 /// Write a rolling uint to an async writer
+#[allow(dead_code)]
 pub async fn write_rolling_uint<W: AsyncWrite + Unpin>(
     writer: &mut W,
     data: u64,

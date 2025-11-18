@@ -33,8 +33,6 @@ pub use deserialize::deserialize;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn basic_test() {
         // Basic sanity check that the module compiles
