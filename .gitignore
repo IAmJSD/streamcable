@@ -1,2 +1,7 @@
 node_modules
 dist
+
+# Rust
+rust/target
+rust/Cargo.lock
+
