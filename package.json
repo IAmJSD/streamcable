@@ -17,12 +17,19 @@
     "scripts": {
         "format:fix": "prettier --write .",
         "build": "tsup",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:ui": "vitest --ui",
+        "test:coverage": "vitest run --coverage",
         "prepublishOnly": "npm run build"
     },
     "devDependencies": {
         "@types/node": "^20.4.2",
-        "typescript": "^5.1.6",
+        "@vitest/coverage-v8": "^4.0.10",
+        "@vitest/ui": "^4.0.10",
         "prettier": "^3.6.2",
-        "tsup": "8.5.0"
+        "tsup": "8.5.0",
+        "typescript": "^5.1.6",
+        "vitest": "^4.0.10"
     }
 }
