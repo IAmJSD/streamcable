@@ -105,6 +105,20 @@ fn read_schema<R: AsyncRead + Unpin>(
             Ok(Schema::Record(Box::new(value_schema)))
         }
         
+        DataType::Promise => {
+            let inner_schema = read_schema(ctx).await?;
+            Ok(Schema::Promise(Box::new(inner_schema)))
+        }
+        
+        DataType::Iterator => {
+            let element_schema = read_schema(ctx).await?;
+            Ok(Schema::Iterator(Box::new(element_schema)))
+        }
+        
+        DataType::ReadableStream => {
+            Ok(Schema::ReadableStream)
+        }
+        
         _ => Err(StreamcableError::Unsupported(format!("Data type {:?} not yet supported", data_type))),
     }
     })
@@ -254,6 +268,16 @@ fn read_value<'a, R: AsyncRead + Unpin>(
                 obj.insert(key, value);
             }
             Ok(Value::Object(obj))
+        }
+        
+        Schema::Promise(_) | Schema::Iterator(_) | Schema::ReadableStream => {
+            // Read stream ID
+            let _id_high = ctx.read_byte().await?;
+            let _id_low = ctx.read_byte().await?;
+            
+            Err(StreamcableError::Unsupported(
+                "Streaming types (Promise, Iterator, ReadableStream) require special async context and stream multiplexing. Use advanced deserialize_with_streams instead.".to_string()
+            ))
         }
     }
     })

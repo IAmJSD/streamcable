@@ -9,8 +9,10 @@ repository = "https://github.com/IAmJSD/streamcable"
 
 [dependencies]
 tokio = { version = "1", features = ["io-util", "sync"] }
+tokio-stream = "0.1"
 bytes = "1"
 futures = "0.3"
+async-stream = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -122,6 +122,37 @@ let schema_nullable = Schema::nullable(Some(Schema::string()));
 let value = Value::Null;
 ```
 
+### Streaming Types with Tokio
+
+**Note**: These types are supported for schema definition and validation, but full serialization/deserialization with stream multiplexing is planned for a future release.
+
+```rust
+use streamcable::{Schema, Value};
+use tokio::sync::oneshot;
+use async_stream::stream;
+
+// Promise - async value using Tokio oneshot channel
+let promise_schema = Schema::promise(Schema::string());
+let (tx, rx) = oneshot::channel();
+let promise_value = Value::Promise(rx);
+
+// Iterator/Stream - async stream of values
+let iterator_schema = Schema::iterator(Schema::uint());
+let value_stream = stream! {
+    for i in 0..5 {
+        yield Ok(Value::Uint(i));
+    }
+};
+let stream_value = Value::Stream(Box::pin(value_stream));
+
+// ReadableStream - byte stream
+let readable_schema = Schema::readable_stream();
+let byte_stream = stream! {
+    yield Ok(bytes::Bytes::from("data"));
+};
+let byte_stream_value = Value::ByteStream(Box::pin(byte_stream));
+```
+
 ## Supported Types
 
 ### Basic Types
@@ -146,18 +177,32 @@ let value = Value::Null;
 - `optional(Schema)` - Optional values
 - `union(Vec<Schema>)` - Union of multiple types
 
-## Limitations
+### Streaming Types (Tokio Primitives)
+- `promise(Schema)` - Promise/Future types using `tokio::sync::oneshot::Receiver`
+- `iterator(Schema)` - Async iterator/stream types using `Stream<Item = Result<Value, _>>`
+- `readable_stream()` - Byte stream types using `Stream<Item = Result<Bytes, _>>`
 
-This implementation currently does not support:
-- `Promise` types (async values)
-- `Iterator` types (streaming values)
-- `ReadableStream` types
+## Implementation Status
 
-These may be added in future versions.
+### Fully Supported ✅
+All basic, complex, and special types are fully implemented with complete serialization/deserialization support.
+
+### Partial Support ⚠️
+Streaming types (Promise, Iterator, ReadableStream) are supported for:
+- Schema definition and validation
+- Schema serialization (wire format compatible)
+- Type checking and composition
+
+**Not yet implemented**:
+- Full stream multiplexing during serialization
+- Stream demultiplexing during deserialization
+- Async context management for concurrent streams
+
+These features require additional infrastructure and will be added in a future release with advanced APIs like `serialize_with_streams()` and `deserialize_with_streams()`.
 
 ## Compatibility
 
-This Rust implementation is compatible with the TypeScript Streamcable library at version 0.0.2. Data serialized by either implementation can be deserialized by the other.
+This Rust implementation is compatible with the TypeScript Streamcable library at version 0.0.2 for all non-streaming types. Streaming types follow the same wire format specification.
 
 ## License
 

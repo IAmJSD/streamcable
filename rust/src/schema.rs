@@ -6,9 +6,16 @@ use crate::data_types::DataType;
 use crate::error::ValidationError;
 use crate::rolling_uint::{get_rolling_uint_size, write_rolling_uint_no_alloc};
 use std::collections::HashMap;
+use std::pin::Pin;
+use futures::Stream;
+
+/// A pinned boxed stream of values
+pub type ValueStream = Pin<Box<dyn Stream<Item = Result<Value, crate::error::StreamcableError>> + Send>>;
+
+/// A pinned boxed stream of bytes
+pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, crate::error::StreamcableError>> + Send>>;
 
 /// Value type that can be serialized
-#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// Boolean value
     Boolean(bool),
@@ -36,6 +43,85 @@ pub enum Value {
     Date(String),
     /// BigInt (u64)
     Bigint(u64),
+    /// Promise value (receiver for async result)
+    Promise(tokio::sync::oneshot::Receiver<Box<Value>>),
+    /// Stream of values (async iterator)
+    Stream(ValueStream),
+    /// Stream of bytes (readable stream)
+    ByteStream(ByteStream),
+}
+
+// Manual Debug implementation since streams don't implement Debug
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Boolean(v) => f.debug_tuple("Boolean").field(v).finish(),
+            Value::Uint8(v) => f.debug_tuple("Uint8").field(v).finish(),
+            Value::Uint(v) => f.debug_tuple("Uint").field(v).finish(),
+            Value::Int(v) => f.debug_tuple("Int").field(v).finish(),
+            Value::Float(v) => f.debug_tuple("Float").field(v).finish(),
+            Value::String(v) => f.debug_tuple("String").field(v).finish(),
+            Value::Bytes(v) => f.debug_tuple("Bytes").field(v).finish(),
+            Value::Array(v) => f.debug_tuple("Array").field(v).finish(),
+            Value::Object(v) => f.debug_tuple("Object").field(v).finish(),
+            Value::Map(v) => f.debug_tuple("Map").field(v).finish(),
+            Value::Null => write!(f, "Null"),
+            Value::Date(v) => f.debug_tuple("Date").field(v).finish(),
+            Value::Bigint(v) => f.debug_tuple("Bigint").field(v).finish(),
+            Value::Promise(_) => write!(f, "Promise(<oneshot receiver>)"),
+            Value::Stream(_) => write!(f, "Stream(<value stream>)"),
+            Value::ByteStream(_) => write!(f, "ByteStream(<byte stream>)"),
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Boolean(a), Value::Boolean(b)) => a == b,
+            (Value::Uint8(a), Value::Uint8(b)) => a == b,
+            (Value::Uint(a), Value::Uint(b)) => a == b,
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Bytes(a), Value::Bytes(b)) => a == b,
+            (Value::Array(a), Value::Array(b)) => a == b,
+            (Value::Object(a), Value::Object(b)) => a == b,
+            (Value::Map(a), Value::Map(b)) => a == b,
+            (Value::Null, Value::Null) => true,
+            (Value::Date(a), Value::Date(b)) => a == b,
+            (Value::Bigint(a), Value::Bigint(b)) => a == b,
+            // Streaming types can't be compared
+            (Value::Promise(_), Value::Promise(_)) => false,
+            (Value::Stream(_), Value::Stream(_)) => false,
+            (Value::ByteStream(_), Value::ByteStream(_)) => false,
+            _ => false,
+        }
+    }
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Value::Boolean(v) => Value::Boolean(*v),
+            Value::Uint8(v) => Value::Uint8(*v),
+            Value::Uint(v) => Value::Uint(*v),
+            Value::Int(v) => Value::Int(*v),
+            Value::Float(v) => Value::Float(*v),
+            Value::String(v) => Value::String(v.clone()),
+            Value::Bytes(v) => Value::Bytes(v.clone()),
+            Value::Array(v) => Value::Array(v.clone()),
+            Value::Object(v) => Value::Object(v.clone()),
+            Value::Map(v) => Value::Map(v.clone()),
+            Value::Null => Value::Null,
+            Value::Date(v) => Value::Date(v.clone()),
+            Value::Bigint(v) => Value::Bigint(*v),
+            // Streaming types can't be cloned - panic with a clear message
+            Value::Promise(_) => panic!("Cannot clone Promise value"),
+            Value::Stream(_) => panic!("Cannot clone Stream value"),
+            Value::ByteStream(_) => panic!("Cannot clone ByteStream value"),
+        }
+    }
 }
 
 /// Schema type that defines how data should be serialized/deserialized
@@ -73,6 +159,12 @@ pub enum Schema {
     Bigint,
     /// Record schema (object with dynamic keys)
     Record(Box<Schema>),
+    /// Promise schema (async value)
+    Promise(Box<Schema>),
+    /// Iterator/Stream schema (async iterable)
+    Iterator(Box<Schema>),
+    /// ReadableStream schema (byte stream)
+    ReadableStream,
 }
 
 impl Schema {
@@ -158,6 +250,21 @@ impl Schema {
         Schema::Record(Box::new(value_schema))
     }
 
+    /// Create a promise schema
+    pub fn promise(inner: Schema) -> Self {
+        Schema::Promise(Box::new(inner))
+    }
+
+    /// Create an iterator/stream schema
+    pub fn iterator(element_schema: Schema) -> Self {
+        Schema::Iterator(Box::new(element_schema))
+    }
+
+    /// Create a readable stream schema
+    pub fn readable_stream() -> Self {
+        Schema::ReadableStream
+    }
+
     /// Validate that a value matches this schema
     pub fn validate(&self, value: &Value) -> Result<(), ValidationError> {
         match (self, value) {
@@ -240,6 +347,15 @@ impl Schema {
                 Ok(())
             }
             (Schema::Record(_), _) => Err(ValidationError::new("Expected record")),
+            
+            (Schema::Promise(_), Value::Promise(_)) => Ok(()),
+            (Schema::Promise(_), _) => Err(ValidationError::new("Expected promise")),
+            
+            (Schema::Iterator(_), Value::Stream(_)) => Ok(()),
+            (Schema::Iterator(_), _) => Err(ValidationError::new("Expected stream/iterator")),
+            
+            (Schema::ReadableStream, Value::ByteStream(_)) => Ok(()),
+            (Schema::ReadableStream, _) => Err(ValidationError::new("Expected readable stream")),
         }
     }
 
@@ -328,6 +444,22 @@ impl Schema {
                 let mut bytes = vec![DataType::Record.to_u8()];
                 bytes.extend_from_slice(&value_schema.to_bytes());
                 bytes
+            }
+            
+            Schema::Promise(inner) => {
+                let mut bytes = vec![DataType::Promise.to_u8()];
+                bytes.extend_from_slice(&inner.to_bytes());
+                bytes
+            }
+            
+            Schema::Iterator(element_schema) => {
+                let mut bytes = vec![DataType::Iterator.to_u8()];
+                bytes.extend_from_slice(&element_schema.to_bytes());
+                bytes
+            }
+            
+            Schema::ReadableStream => {
+                vec![DataType::ReadableStream.to_u8()]
             }
         }
     }

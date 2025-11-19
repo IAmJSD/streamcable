@@ -7,7 +7,11 @@ A binary serialization format for objects optimized for streaming.
 ## Implementations
 
 - **TypeScript/JavaScript** - Full implementation with support for streaming types (Promise, Iterator, ReadableStream)
-- **Rust** - Complete implementation compatible with TypeScript (see `rust/` directory)
+- **Rust** - Complete implementation with Tokio-based streaming primitives (see `rust/` directory)
+  - Fully supports all basic and complex types
+  - Streaming types (Promise, Iterator, ReadableStream) use Tokio primitives
+  - Schema definition and validation for all types
+  - Stream multiplexing planned for future release
 
 ## Features
 
@@ -16,7 +20,9 @@ A binary serialization format for objects optimized for streaming.
 - Support for complex types: arrays, objects, maps
 - Support for nullable and optional values
 - Support for union types
-- Streaming support in TypeScript implementation
+- Streaming types: Promise, Iterator, ReadableStream
+  - Full implementation in TypeScript
+  - Schema support with Tokio primitives in Rust
 
 ## Quick Start
 

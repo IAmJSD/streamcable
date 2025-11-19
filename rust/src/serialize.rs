@@ -93,6 +93,11 @@ fn calculate_value_size(schema: &Schema, value: &Value) -> Result<usize, Streamc
             Ok(size)
         }
         
+        // Streaming types return fixed size for stream ID
+        (Schema::Promise(_), Value::Promise(_)) => Ok(2), // stream ID
+        (Schema::Iterator(_), Value::Stream(_)) => Ok(2), // stream ID
+        (Schema::ReadableStream, Value::ByteStream(_)) => Ok(2), // stream ID
+        
         _ => Err(StreamcableError::InvalidData("Schema and value type mismatch".to_string())),
     }
 }
@@ -237,6 +242,19 @@ fn write_value(
                 write_value(value_schema, value, buf, pos)?;
             }
             Ok(())
+        }
+        
+        // Streaming types - write placeholder stream ID (will be replaced by actual implementation)
+        (Schema::Promise(_), Value::Promise(_)) |
+        (Schema::Iterator(_), Value::Stream(_)) |
+        (Schema::ReadableStream, Value::ByteStream(_)) => {
+            // Write a stream ID (0 for now as placeholder)
+            buf[*pos] = 0;
+            buf[*pos + 1] = 0;
+            *pos += 2;
+            Err(StreamcableError::Unsupported(
+                "Streaming types (Promise, Iterator, ReadableStream) require async context and are not yet fully implemented in basic serialize function. Use advanced serialize_with_streams instead.".to_string()
+            ))
         }
         
         _ => Err(StreamcableError::InvalidData("Schema and value type mismatch".to_string())),
