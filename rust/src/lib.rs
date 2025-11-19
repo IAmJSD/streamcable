@@ -24,12 +24,14 @@ mod schema;
 mod serialize;
 mod deserialize;
 mod read_context;
+mod stream_multiplexer;
 
 pub use data_types::DataType;
 pub use error::{StreamcableError, ValidationError};
-pub use schema::{Schema, Value};
+pub use schema::{Schema, Value, ValueStream, ByteStream};
 pub use serialize::serialize;
 pub use deserialize::deserialize;
+pub use stream_multiplexer::{StreamMultiplexer, StreamWriter, serialize_promise, serialize_iterator, serialize_byte_stream};
 
 #[cfg(test)]
 mod tests {

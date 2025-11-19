@@ -182,23 +182,38 @@ let byte_stream_value = Value::ByteStream(Box::pin(byte_stream));
 - `iterator(Schema)` - Async iterator/stream types using `Stream<Item = Result<Value, _>>`
 - `readable_stream()` - Byte stream types using `Stream<Item = Result<Bytes, _>>`
 
+**Stream Multiplexing**: Use `StreamMultiplexer` to serialize streaming types:
+```rust
+use streamcable::{StreamMultiplexer, serialize_promise};
+
+let (multiplexer, rx) = StreamMultiplexer::new();
+let stream_id = serialize_promise(&multiplexer, promise, &schema).await?;
+// Messages are sent through the rx channel
+```
+
+See `examples/multiplexing.rs` for complete usage.
+
 ## Implementation Status
 
 ### Fully Supported ✅
 All basic, complex, and special types are fully implemented with complete serialization/deserialization support.
 
-### Partial Support ⚠️
+### Streaming Types ✅ (Partial)
 Streaming types (Promise, Iterator, ReadableStream) are supported for:
-- Schema definition and validation
-- Schema serialization (wire format compatible)
-- Type checking and composition
+- Schema definition and validation ✅
+- Schema serialization (wire format compatible) ✅
+- Type checking and composition ✅
+- **Stream multiplexing infrastructure** ✅ (NEW!)
+  - `StreamMultiplexer` for managing concurrent streams
+  - `serialize_promise()`, `serialize_iterator()`, `serialize_byte_stream()` functions
+  - Message routing and stream lifecycle management
 
-**Not yet implemented**:
-- Full stream multiplexing during serialization
-- Stream demultiplexing during deserialization
-- Async context management for concurrent streams
+**In Progress**:
+- Integration with main `serialize()` function
+- Full deserialization with stream demultiplexing
+- Advanced APIs: `serialize_with_streams()`, `deserialize_with_streams()`
 
-These features require additional infrastructure and will be added in a future release with advanced APIs like `serialize_with_streams()` and `deserialize_with_streams()`.
+See `examples/multiplexing.rs` for stream multiplexing usage.
 
 ## Compatibility
 
