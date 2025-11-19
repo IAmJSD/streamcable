@@ -18,10 +18,7 @@ import { serialize } from "../serialize";
 import { deserialize } from "../deserialize";
 
 // Helper to create a simple serialize/deserialize flow for testing
-async function serializeToBuffer<T>(
-    schema: any,
-    data: T,
-): Promise<Uint8Array> {
+async function serializeToBuffer<T>(schema: any, data: T): Promise<Uint8Array> {
     const chunks: Buffer[] = [];
     const writable = new Writable({
         write(chunk, encoding, callback) {
@@ -181,9 +178,9 @@ describe("Complex Schema Types", () => {
             expect(() => schema.validateAndMakeWriter("not array")).toThrow(
                 ValidationError,
             );
-            expect(() => schema.validateAndMakeWriter({ 0: "a", 1: "b" })).toThrow(
-                ValidationError,
-            );
+            expect(() =>
+                schema.validateAndMakeWriter({ 0: "a", 1: "b" }),
+            ).toThrow(ValidationError);
         });
     });
 

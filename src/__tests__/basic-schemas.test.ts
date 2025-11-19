@@ -15,10 +15,7 @@ import { deserialize } from "../deserialize";
 import { Writable, PassThrough } from "stream";
 
 // Helper to create a simple serialize/deserialize flow for testing
-async function serializeToBuffer<T>(
-    schema: any,
-    data: T,
-): Promise<Uint8Array> {
+async function serializeToBuffer<T>(schema: any, data: T): Promise<Uint8Array> {
     const chunks: Buffer[] = [];
     const writable = new Writable({
         write(chunk, encoding, callback) {

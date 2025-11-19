@@ -178,7 +178,10 @@ describe("Integration Tests - Real World Scenarios", () => {
         expect(result).toEqual(textMessage);
 
         // Test image message
-        const imageMessage = { type: "image", imageUrl: "https://example.com/img.jpg" };
+        const imageMessage = {
+            type: "image",
+            imageUrl: "https://example.com/img.jpg",
+        };
         result = await roundTrip(messageSchema, imageMessage);
         expect(result).toEqual(imageMessage);
 

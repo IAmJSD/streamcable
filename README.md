@@ -7,6 +7,7 @@
 ### Running Tests
 
 This project uses [Vitest](https://vitest.dev/) for testing. The test suite includes comprehensive tests for:
+
 - Basic schema types (string, uint, boolean, etc.)
 - Complex schema types (object, array, union, etc.)
 - Streaming functionality (promise, iterator, readableStream)

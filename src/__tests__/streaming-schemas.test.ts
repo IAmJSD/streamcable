@@ -16,9 +16,7 @@ describe("Streaming Schema Types - Validation", () => {
             const validData = Promise.resolve("hello");
 
             // Should not throw for valid Promise
-            expect(() =>
-                schema.validateAndMakeWriter(validData),
-            ).not.toThrow();
+            expect(() => schema.validateAndMakeWriter(validData)).not.toThrow();
         });
 
         it("should throw ValidationError for non-Promise values", () => {
@@ -30,9 +28,9 @@ describe("Streaming Schema Types - Validation", () => {
             expect(() => schema.validateAndMakeWriter(123)).toThrow(
                 ValidationError,
             );
-            expect(() => schema.validateAndMakeWriter({ then: "fake" })).toThrow(
-                ValidationError,
-            );
+            expect(() =>
+                schema.validateAndMakeWriter({ then: "fake" }),
+            ).toThrow(ValidationError);
         });
 
         it("should accept different inner schemas", () => {
@@ -121,9 +119,9 @@ describe("Streaming Schema Types - Validation", () => {
         it("should throw ValidationError for non-ReadableStream values", () => {
             const schema = readableStream();
 
-            expect(() =>
-                schema.validateAndMakeWriter("not a stream"),
-            ).toThrow(ValidationError);
+            expect(() => schema.validateAndMakeWriter("not a stream")).toThrow(
+                ValidationError,
+            );
             expect(() => schema.validateAndMakeWriter([])).toThrow(
                 ValidationError,
             );
