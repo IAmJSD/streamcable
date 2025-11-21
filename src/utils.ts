@@ -1,8 +1,4 @@
-export type ReadContext = {
-    readByte: () => Promise<number>;
-    peekByte: () => Promise<number>;
-    readBytes: (length: number) => Promise<Uint8Array>;
-};
+import type { ReadContext } from "./ReadContext";
 
 export const dataType = {
     // 0x00 is reserved
@@ -36,6 +32,7 @@ export const dataType = {
     map: 0x14,
 
     any: 0x15,
+    compressionTable: 0x16,
 };
 
 export async function readRollingUintNoAlloc(

@@ -4,6 +4,7 @@ import {
     bigint,
     boolean,
     buffer,
+    compressionTable,
     date,
     float,
     int,
@@ -22,7 +23,8 @@ import {
     union,
     type Schema,
 } from "./schemas";
-import { dataType, readRollingUintNoAlloc, type ReadContext } from "./utils";
+import { dataType, readRollingUintNoAlloc } from "./utils";
+import type { ReadContext } from "./ReadContext";
 
 const td = new TextDecoder();
 
@@ -97,6 +99,9 @@ export async function reflectByteReprToSchema(
             );
         case dataType.any:
             return any();
+        case dataType.compressionTable:
+            // deep doesn't matter for read reflection
+            return compressionTable(await reflectByteReprToSchema(ctx), false);
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

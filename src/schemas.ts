@@ -1,17 +1,17 @@
 import { OutOfDataError } from "./ReadContext";
-import {
-    dataType,
-    readRollingUintNoAlloc,
-    ReadContext,
-    WriteContext,
-} from "./utils";
+import { dataType, readRollingUintNoAlloc, WriteContext } from "./utils";
 import FlatPromiseStream from "./FlatPromiseStream";
 import type { output } from "./deserialize";
+import type { ReadContext } from "./ReadContext";
 
 function base<T>(
     name: string,
     validateAndMakeWriter: (
         data: unknown,
+
+        // This can't be in the write context because it is needed when
+        // we figure out the size of the data to write.
+        scratchPad: { [key: symbol]: any },
     ) => [number, (ctx: WriteContext) => void],
     readFromContext: (
         ctx: ReadContext,
@@ -20,6 +20,7 @@ function base<T>(
             cb: (ctx: ReadContext) => Promise<void>,
             onDisconnect: () => void,
         ) => (slurp: boolean) => void,
+        scratchPad: { [key: symbol]: any },
     ) => Promise<[T]>,
     schema: Uint8Array<ArrayBuffer>,
 ) {
@@ -83,11 +84,11 @@ function getEncodedLenNoAlloc(t: string) {
 export function pipe<T>(from: Schema<T>, into: (data: T) => T): Schema<T> {
     return {
         name: "pipe",
-        validateAndMakeWriter: (data) => {
+        validateAndMakeWriter: (data, scratchPad) => {
             // Run at the beginning to make sure the type is correct before
-            from.validateAndMakeWriter(data);
+            from.validateAndMakeWriter(data, {}); // Intentionally empty scratchPad so we don't add to any tables
             data = into(data as T);
-            return from.validateAndMakeWriter(data);
+            return from.validateAndMakeWriter(data, scratchPad);
         },
         readFromContext: from.readFromContext,
         schema: from.schema,
@@ -160,12 +161,15 @@ export function array<T>(elements: Schema<T>, message?: string) {
 
     return base<T[]>(
         "array",
-        (data) => {
+        (data, scratchPad) => {
             if (!Array.isArray(data)) throw new ValidationError(message);
             let size = getRollingUintSize(data.length);
             const writers: ((ctx: WriteContext) => void)[] = [];
             for (const item of data) {
-                const [s, writer] = elements.validateAndMakeWriter(item);
+                const [s, writer] = elements.validateAndMakeWriter(
+                    item,
+                    scratchPad,
+                );
                 size += s;
                 writers.push(writer);
             }
@@ -183,13 +187,14 @@ export function array<T>(elements: Schema<T>, message?: string) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const len = await readRollingUintNoAlloc(ctx);
             const res: T[] = [];
             for (let i = 0; i < len; i++) {
                 const item = await elements.readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 res.push(item[0]);
             }
@@ -265,7 +270,7 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
 
     return base<Resolved>(
         "object",
-        (data) => {
+        (data, scratchPad) => {
             if (
                 typeof data !== "object" ||
                 data === null ||
@@ -278,6 +283,7 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
             for (const key of keys) {
                 const [s, writer] = schemas[key].validateAndMakeWriter(
                     (data as any)[key],
+                    scratchPad,
                 );
                 size += s;
                 writers.push(writer);
@@ -291,12 +297,13 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const res: any = {};
             for (const key of keys) {
                 const value = await schemas[key].readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 res[key] = value[0];
             }
@@ -467,7 +474,7 @@ export function promise<T>(inner: Schema<T>, message?: string) {
 
     return base<Promise<T>>(
         "promise",
-        (data) => {
+        (data, scratchPad) => {
             if (!(data instanceof Promise)) throw new ValidationError(message);
 
             return [
@@ -477,10 +484,11 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                     ctx.buf[ctx.pos] = (id >> 8) & 0xff;
                     ctx.buf[ctx.pos + 1] = id & 0xff;
                     ctx.pos += 2;
-                    const scratch: any[] = [];
                     data.then((value) => {
-                        const [size, ctxWriter] =
-                            inner.validateAndMakeWriter(value);
+                        const [size, ctxWriter] = inner.validateAndMakeWriter(
+                            value,
+                            scratchPad,
+                        );
                         const buf = new Uint8Array(1 + size); // 1 byte for success flag
                         buf[0] = 1; // success
                         const writeCtx: WriteContext = {
@@ -495,11 +503,14 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                         if (err instanceof SerializableError) {
                             // Get the size of the serialized error data
                             const [size, ctxWriter] =
-                                err.schema.validateAndMakeWriter(err.data);
+                                err.schema.validateAndMakeWriter(
+                                    err.data,
+                                    scratchPad,
+                                );
                             const buf = new Uint8Array(
                                 1 + err.schema.schema.length + size,
                             );
-                            buf[0] = 0; // failure
+                            buf[0] = 0; // failurehandleCopySafety
                             buf.set(err.schema.schema, 1);
                             const writeCtx: WriteContext = {
                                 buf,
@@ -517,7 +528,7 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const idHigh = await ctx.readByte();
             const idLow = await ctx.readByte();
             const id = (idHigh << 8) | idLow;
@@ -534,6 +545,7 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                                 const value = await inner.readFromContext(
                                     streamCtx,
                                     hijackReadContext,
+                                    scratchPad,
                                 );
                                 resolve(value[0]);
                                 return;
@@ -549,6 +561,7 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                                     await errorSchema.readFromContext(
                                         streamCtx,
                                         hijackReadContext,
+                                        scratchPad,
                                     );
                                 reject(
                                     new SerializableError(
@@ -610,7 +623,7 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
 
     return base<Iterable<T> | AsyncIterable<T>>(
         "iterator",
-        (data) => {
+        (data, scratchPad) => {
             if (
                 typeof data !== "object" ||
                 data === null ||
@@ -630,7 +643,10 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                         try {
                             for await (const item of data as any) {
                                 const [size, ctxWriter] =
-                                    elements.validateAndMakeWriter(item);
+                                    elements.validateAndMakeWriter(
+                                        item,
+                                        scratchPad,
+                                    );
                                 const buf = new Uint8Array(1 + size); // 1 byte for continuation flag
                                 buf[0] = 1; // continuation
                                 const writeCtx: WriteContext = {
@@ -648,7 +664,10 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                             if (err instanceof SerializableError) {
                                 // Get the size of the serialized error data
                                 const [size, ctxWriter] =
-                                    err.schema.validateAndMakeWriter(err.data);
+                                    err.schema.validateAndMakeWriter(
+                                        err.data,
+                                        scratchPad,
+                                    );
                                 const buf = new Uint8Array(
                                     1 + err.schema.schema.length + size,
                                 );
@@ -671,7 +690,7 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const idHigh = await ctx.readByte();
             const idLow = await ctx.readByte();
             const id = (idHigh << 8) | idLow;
@@ -688,6 +707,7 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                             const value = await elements.readFromContext(
                                 streamCtx,
                                 hijackReadContext,
+                                scratchPad,
                             );
                             promiseStream.resolve(value[0]);
                             return;
@@ -710,6 +730,7 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
                             const errorData = await errorSchema.readFromContext(
                                 streamCtx,
                                 hijackReadContext,
+                                scratchPad,
                             );
                             promiseStream.reject(
                                 new SerializableError(
@@ -918,13 +939,12 @@ export function union<
             : never
     >(
         "union",
-        (data) => {
+        (data, scratchPad) => {
             const errors: ValidationError[] = [];
-            let writer: [number, (ctx: WriteContext) => void] | null = null;
             let idx = -1;
             for (let i = 0; i < others.length; i++) {
                 try {
-                    writer = others[i].validateAndMakeWriter(data);
+                    others[i].validateAndMakeWriter(data, {});
                     idx = i;
                     break;
                 } catch (err) {
@@ -935,21 +955,25 @@ export function union<
                     }
                 }
             }
-            if (!writer) {
+            if (idx === -1) {
                 // If we reach here, none matched.
                 throw new ValidationError(
                     `Data did not match any schema in union: ${errors.map((e) => e.message).join("; ")}`,
                 );
             }
+            const [size, writer] = others[idx].validateAndMakeWriter(
+                data,
+                scratchPad,
+            );
             return [
-                getRollingUintSize(idx) + writer[0],
+                getRollingUintSize(idx) + size,
                 (ctx: WriteContext) => {
                     ctx.pos = writeRollingUintNoAlloc(idx, ctx.buf, ctx.pos);
-                    writer![1](ctx);
+                    writer(ctx);
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const index = await readRollingUintNoAlloc(ctx);
             if (index < 0 || index >= others.length) {
                 throw new Error("internal: Invalid union schema index");
@@ -957,6 +981,7 @@ export function union<
             const value = await others[index].readFromContext(
                 ctx,
                 hijackReadContext,
+                scratchPad,
             );
             return value as any;
         },
@@ -1117,7 +1142,7 @@ export function float(message?: string) {
 export function nullable<T = null>(inner?: Schema<T>) {
     return base<T | null>(
         "nullable",
-        (data) => {
+        (data, scratchPad) => {
             if (data === null) {
                 return [
                     1,
@@ -1132,7 +1157,10 @@ export function nullable<T = null>(inner?: Schema<T>) {
                     "Data must be null (no inner schema provided)",
                 );
             }
-            const [size, writer] = inner.validateAndMakeWriter(data);
+            const [size, writer] = inner.validateAndMakeWriter(
+                data,
+                scratchPad,
+            );
             return [
                 1 + size,
                 (ctx: WriteContext) => {
@@ -1142,7 +1170,7 @@ export function nullable<T = null>(inner?: Schema<T>) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const flag = await ctx.readByte();
             if (flag === 0) {
                 return [null];
@@ -1156,6 +1184,7 @@ export function nullable<T = null>(inner?: Schema<T>) {
                 const value = await inner.readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 return value as [T];
             }
@@ -1185,7 +1214,7 @@ export function nullable<T = null>(inner?: Schema<T>) {
 export function optional<T>(inner: Schema<T>) {
     return base<T | undefined>(
         "optional",
-        (data) => {
+        (data, scratchPad) => {
             if (data === undefined) {
                 return [
                     1,
@@ -1195,7 +1224,10 @@ export function optional<T>(inner: Schema<T>) {
                     },
                 ];
             }
-            const [size, writer] = inner.validateAndMakeWriter(data);
+            const [size, writer] = inner.validateAndMakeWriter(
+                data,
+                scratchPad,
+            );
             return [
                 1 + size,
                 (ctx: WriteContext) => {
@@ -1205,7 +1237,7 @@ export function optional<T>(inner: Schema<T>) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const flag = await ctx.readByte();
             if (flag === 0) {
                 return [undefined];
@@ -1214,6 +1246,7 @@ export function optional<T>(inner: Schema<T>) {
                 const value = await inner.readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 return value as [T];
             }
@@ -1396,7 +1429,7 @@ export function record<S extends Schema<any>>(
 
     return base<Record<string, output<S>>>(
         "record",
-        (data) => {
+        (data, scratchPad) => {
             if (
                 typeof data !== "object" ||
                 data === null ||
@@ -1414,6 +1447,7 @@ export function record<S extends Schema<any>>(
                 size += getRollingUintSize(keyLen) + keyLen;
                 const [s, writer] = child.validateAndMakeWriter(
                     (data as any)[key],
+                    scratchPad,
                 );
                 size += s;
                 writers.push(writer);
@@ -1444,7 +1478,7 @@ export function record<S extends Schema<any>>(
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const len = await readRollingUintNoAlloc(ctx);
             const res: Record<string, output<S>> = {};
             for (let i = 0; i < len; i++) {
@@ -1454,6 +1488,7 @@ export function record<S extends Schema<any>>(
                 const value = await child.readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 res[key] = value[0];
             }
@@ -1490,17 +1525,19 @@ export function map<K, V>(
 
     return base<Map<K, V>>(
         "map",
-        (data) => {
+        (data, scratchPad) => {
             if (!(data instanceof Map)) {
                 throw new ValidationError(message);
             }
             const writers: ((ctx: WriteContext) => void)[] = [];
             let size = getRollingUintSize(data.size);
             for (const [key, value] of data.entries()) {
-                const [keySize, keyWriter] =
-                    keySchema.validateAndMakeWriter(key);
+                const [keySize, keyWriter] = keySchema.validateAndMakeWriter(
+                    key,
+                    scratchPad,
+                );
                 const [valueSize, valueWriter] =
-                    valueSchema.validateAndMakeWriter(value);
+                    valueSchema.validateAndMakeWriter(value, scratchPad);
                 size += keySize + valueSize;
                 writers.push((ctx: WriteContext) => {
                     keyWriter(ctx);
@@ -1521,17 +1558,19 @@ export function map<K, V>(
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const len = await readRollingUintNoAlloc(ctx);
             const res = new Map<K, V>();
             for (let i = 0; i < len; i++) {
                 const keyValue = await keySchema.readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 const valueValue = await valueSchema.readFromContext(
                     ctx,
                     hijackReadContext,
+                    scratchPad,
                 );
                 res.set(keyValue[0], valueValue[0]);
             }
@@ -1542,6 +1581,291 @@ export function map<K, V>(
             ...keySchema.schema,
             ...valueSchema.schema,
         ]),
+    );
+}
+
+const compressionTableKey = Symbol("compressionTableKey");
+
+const deepCompressionTableKey = Symbol("deepCompressionTableKey");
+
+function useScratchPadValue<T>(
+    scratchPad: { [key: symbol]: any },
+    key: symbol,
+    defaultValue: T,
+): T {
+    if (!(key in scratchPad)) {
+        scratchPad[key] = defaultValue;
+    }
+    return scratchPad[key];
+}
+
+function createStreamBuffer(
+    stream: ReadableStream<Uint8Array>,
+): [() => ReadableStream<Uint8Array>, ReadableStream<Uint8Array>] {
+    const tee = stream.tee();
+    let x: ReadableStream<Uint8Array> = tee[0];
+    return [
+        () => {
+            const newTee = x.tee();
+            x = newTee[0];
+            return newTee[1];
+        },
+        tee[1],
+    ];
+}
+
+const errSymbol = Symbol("err");
+
+function createIteratorBuffer(
+    iter: AsyncIterable<any> | Iterable<any>,
+): [() => AsyncIterable<any>, AsyncIterable<any>] {
+    const readers: ((
+        value: IteratorResult<any> | { [key: symbol]: any },
+    ) => void)[] = [];
+    const results: [any, any][] = [];
+
+    (async () => {
+        try {
+            for await (const value of iter) {
+                if (readers.length > 0) {
+                    const reader = readers.shift()!;
+                    reader({ value, done: false });
+                } else {
+                    results.push([value, errSymbol]);
+                }
+            }
+            // Signal completion
+            for (const reader of readers) {
+                reader({ value: undefined, done: true });
+            }
+        } catch (err) {
+            if (readers.length > 0) {
+                // Signal error
+                for (const reader of readers) {
+                    reader({ [errSymbol]: err });
+                }
+            } else {
+                // Store error for future readers
+                results.push([undefined, err]);
+            }
+        }
+    })();
+
+    const newIterator: () => AsyncIterable<any> = () => {
+        return {
+            async *[Symbol.asyncIterator]() {
+                for (;;) {
+                    if (results.length > 0) {
+                        const [value, err] = results.shift()!;
+                        if (err === errSymbol) {
+                            yield value;
+                        } else {
+                            throw err;
+                        }
+                    } else {
+                        const result:
+                            | IteratorResult<any>
+                            | { [key: symbol]: any } = await new Promise(
+                            (resolve) => {
+                                readers.push(resolve);
+                            },
+                        );
+                        if (errSymbol in result) {
+                            throw result[errSymbol];
+                        }
+                        if ((result as IteratorResult<any>).done) {
+                            return;
+                        }
+                        yield (result as IteratorResult<any>).value;
+                    }
+                }
+            },
+        };
+    };
+
+    return [newIterator, newIterator()];
+}
+
+class _CopyProtector {
+    constructor(public clone: () => any) {}
+}
+
+function handleCopySafety(value: any): [any, any] {
+    if (value instanceof ReadableStream) {
+        const [cloner, stream] = createStreamBuffer(value);
+        return [new _CopyProtector(cloner), stream];
+    }
+
+    if (
+        value &&
+        (typeof value[Symbol.asyncIterator] === "function" ||
+            typeof value[Symbol.iterator] === "function")
+    ) {
+        const [cloner, iter] = createIteratorBuffer(value);
+        return [new _CopyProtector(cloner), iter];
+    }
+
+    if (Array.isArray(value)) {
+        const a = new Array(value.length);
+        const b = new Array(value.length);
+        for (let i = 0; i < value.length; i++) {
+            const [childA, childB] = handleCopySafety(value[i]);
+            a[i] = childA;
+            b[i] = childB;
+        }
+        return [a, b];
+    }
+
+    return [value, value];
+}
+
+function writeOneCmpIndex(idx: number): [number, (ctx: WriteContext) => void] {
+    const size = getRollingUintSize(idx + 1);
+    return [
+        size,
+        (ctx: WriteContext) => {
+            ctx.pos = writeRollingUintNoAlloc(idx + 1, ctx.buf, ctx.pos);
+        },
+    ];
+}
+
+function notIterableOrStream(data: any): boolean {
+    if (data instanceof ReadableStream) {
+        return false;
+    }
+    if (
+        data &&
+        (typeof data[Symbol.asyncIterator] === "function" ||
+            typeof data[Symbol.iterator] === "function") &&
+        typeof data === "object"
+    ) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Defines a schema that compresses repeated values using a compression table.
+ * When a value is first encountered, it is stored in the table and serialized in full.
+ * Subsequent occurrences of the same value are replaced with a reference index to the table.
+ * If `deep` is true, deep equality checks are performed for objects and arrays.
+ *
+ * @template T - The schema type for the values being compressed
+ * @param child - Schema for the values to be compressed
+ * @param deep - Whether to use deep equality checks for objects/arrays
+ * @returns Schema that compresses repeated values
+ *
+ * @example
+ * ```typescript
+ * const compressedStrings = compressionTable(string(), false);
+ * const compressedObjects = compressionTable(object({ name: string(), age: uint() }), true);
+ * ```
+ */
+export function compressionTable<T extends Schema<any>>(
+    child: T,
+    deep: boolean,
+) {
+    const randomStr = Math.random().toString(36).slice(2);
+    return base<output<T>>(
+        "compressionTable",
+        (data, scratchPad) => {
+            const reverseTable = useScratchPadValue(
+                scratchPad,
+                compressionTableKey,
+                new Map<any, number>(),
+            );
+
+            const nonDeepVal = reverseTable.get(data);
+            if (nonDeepVal !== undefined) {
+                return writeOneCmpIndex(nonDeepVal);
+            }
+
+            const index = reverseTable.size;
+            reverseTable.set(data, index);
+
+            if (deep && notIterableOrStream(data)) {
+                const deepReverseTable = useScratchPadValue(
+                    scratchPad,
+                    deepCompressionTableKey,
+                    new Map<string, number>(),
+                );
+
+                // Turn it into a string representation for deep comparison
+                const dataStr =
+                    randomStr +
+                    JSON.stringify(data, (_key, value) => {
+                        if (value instanceof ReadableStream) {
+                            return "[ReadableStream]";
+                        }
+                        if (!notIterableOrStream(value)) {
+                            return "[Iterable]";
+                        }
+                        if (typeof value === "bigint") {
+                            return value.toString() + "n";
+                        }
+                        if (value instanceof Map) {
+                            return {
+                                __type: "Map",
+                                value: Array.from(value.entries()),
+                            };
+                        }
+                        return value;
+                    });
+                const deepVal = deepReverseTable.get(dataStr);
+                if (deepVal !== undefined) {
+                    // Update non-deep table as well
+                    reverseTable.set(data, deepVal);
+
+                    return writeOneCmpIndex(deepVal);
+                }
+
+                // Otherwise, add to deep table
+                deepReverseTable.set(dataStr, index);
+            }
+
+            // Write full value with a 0 prefix to indicate new entry
+            const [size, writer] = child.validateAndMakeWriter(
+                data,
+                scratchPad,
+            );
+            return [
+                size + getRollingUintSize(0),
+                (ctx: WriteContext) => {
+                    ctx.pos = writeRollingUintNoAlloc(0, ctx.buf, ctx.pos);
+                    writer(ctx);
+                },
+            ];
+        },
+        async (ctx, hijackReadContext, scratchPad) => {
+            const table = useScratchPadValue(
+                scratchPad,
+                compressionTableKey,
+                [] as any[],
+            );
+            const index = await readRollingUintNoAlloc(ctx);
+            if (index === 0) {
+                const value = await child.readFromContext(
+                    ctx,
+                    hijackReadContext,
+                    scratchPad,
+                );
+                const [parent, copySafeVal] = handleCopySafety(value[0]);
+                table.push(parent);
+                return [copySafeVal as output<T>];
+            }
+            const entry = table[index - 1];
+            if (entry === undefined) {
+                if (table.length >= index) {
+                    return [undefined as output<T>];
+                }
+                throw new Error("internal: Invalid compression table index");
+            }
+            if (entry instanceof _CopyProtector) {
+                return [entry.clone() as output<T>];
+            }
+            return [entry as output<T>];
+        },
+        new Uint8Array([dataType.compressionTable, ...child.schema]),
     );
 }
 
@@ -1677,9 +2001,12 @@ export function any(message?: string) {
 
     return base<any>(
         "any",
-        (data) => {
+        (data, scratchPad) => {
             const schema = reflectDataToSchema(data);
-            const [size, writer] = schema.validateAndMakeWriter(data);
+            const [size, writer] = schema.validateAndMakeWriter(
+                data,
+                scratchPad,
+            );
             return [
                 schema.schema.length + size,
                 (ctx) => {
@@ -1689,10 +2016,10 @@ export function any(message?: string) {
                 },
             ];
         },
-        async (ctx, hijackReadContext) => {
+        async (ctx, hijackReadContext, scratchPad) => {
             const { reflectByteReprToSchema } = await import("./reflection");
             const schema = await reflectByteReprToSchema(ctx);
-            return schema.readFromContext(ctx, hijackReadContext);
+            return schema.readFromContext(ctx, hijackReadContext, scratchPad);
         },
         new Uint8Array([dataType.any]),
     );

@@ -126,7 +126,7 @@ export async function deserialize<S extends Schema<any>>(
     };
 
     const result = (
-        await schema.readFromContext(readCtx, hijackReadContext)
+        await schema.readFromContext(readCtx, hijackReadContext, {})
     )[0];
     if (usages === 0) {
         // Abort now.

@@ -36,7 +36,7 @@ async function browserSerialize<Resolved, S extends Schema<Resolved>>(
     if (!lastUpdateIsUs) {
         size += schema.schema.length;
     }
-    const [valueSize, writeData] = schema.validateAndMakeWriter(data);
+    const [valueSize, writeData] = schema.validateAndMakeWriter(data, {});
     size += valueSize;
 
     // Create a buffer of that size and write the header.
@@ -196,7 +196,7 @@ export async function serialize<S extends Schema<any>>(
     if (!lastUpdateIsUs) {
         size += schema.schema.length;
     }
-    const [valueSize, writeData] = schema.validateAndMakeWriter(data);
+    const [valueSize, writeData] = schema.validateAndMakeWriter(data, {});
     size += valueSize;
 
     // Create a buffer of that size and write the header.
