@@ -510,7 +510,7 @@ export function promise<T>(inner: Schema<T>, message?: string) {
                             const buf = new Uint8Array(
                                 1 + err.schema.schema.length + size,
                             );
-                            buf[0] = 0; // failurehandleCopySafety
+                            buf[0] = 0; // failure
                             buf.set(err.schema.schema, 1);
                             const writeCtx: WriteContext = {
                                 buf,
