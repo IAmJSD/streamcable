@@ -13,6 +13,7 @@ import {
     nullable,
     object,
     optional,
+    potentiallyFloatString,
     promise,
     readableStream,
     record,
@@ -102,6 +103,8 @@ export async function reflectByteReprToSchema(
         case dataType.compressionTable:
             // deep doesn't matter for read reflection
             return compressionTable(await reflectByteReprToSchema(ctx), false);
+        case dataType.potentiallyFloatString:
+            return potentiallyFloatString();
         default:
             throw new Error(
                 `Unknown type byte in reflected schema: ${typeByte}`,

@@ -33,6 +33,7 @@ export const dataType = {
 
     any: 0x15,
     compressionTable: 0x16,
+    potentiallyFloatString: 0x17,
 };
 
 export async function readRollingUintNoAlloc(

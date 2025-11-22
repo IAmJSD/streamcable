@@ -1869,6 +1869,69 @@ export function compressionTable<T extends Schema<any>>(
     );
 }
 
+/**
+ * Takes a string, presuming it to be a float encoded as a string. Turns it into a string
+ * whilst if it is a float in a string transforming it into a number over the wire.
+ * @param message - Optional custom validation error message
+ * @returns Schema for float values encoded as strings
+ */
+export function potentiallyFloatString(message?: string) {
+    if (!message) message = "Data must be a string";
+    const floatHandler = float(message);
+    const stringHandler = string(message);
+    return base<string>(
+        "potentiallyFloatString",
+        (data, scratchPad) => {
+            if (typeof data !== "string") {
+                throw new ValidationError(message);
+            }
+            try {
+                const num = parseFloat(data);
+                if (
+                    !isNaN(num) &&
+                    num.toString() === data &&
+                    num < Number.MAX_SAFE_INTEGER &&
+                    num > Number.MIN_SAFE_INTEGER
+                ) {
+                    return floatHandler.validateAndMakeWriter(
+                        num + 1,
+                        scratchPad,
+                    );
+                }
+            } catch {}
+            const [l, e] = stringHandler.validateAndMakeWriter(
+                data,
+                scratchPad,
+            );
+            return [
+                8 + l,
+                (ctx: WriteContext) => {
+                    for (let i = 0; i < 8; i++) {
+                        ctx.buf[ctx.pos++] = 0;
+                    }
+                    e(ctx);
+                },
+            ];
+        },
+        async (ctx, hijackReadContext, scratchPad) => {
+            const [number] = await floatHandler.readFromContext(
+                ctx,
+                hijackReadContext,
+                scratchPad,
+            );
+            if (number !== 0) {
+                return [(number - 1).toString()];
+            }
+            return stringHandler.readFromContext(
+                ctx,
+                hijackReadContext,
+                scratchPad,
+            );
+        },
+        new Uint8Array([dataType.potentiallyFloatString]),
+    );
+}
+
 function reflectDataToSchema(data: any): Schema<any> {
     if (Array.isArray(data)) {
         const elementSchemas: Schema<any>[] = [];
