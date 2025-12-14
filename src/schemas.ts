@@ -1445,6 +1445,11 @@ export function record<S extends Schema<any>>(
             for (const key of keys) {
                 const keyLen = getEncodedLenNoAlloc(key);
                 size += getRollingUintSize(keyLen) + keyLen;
+                if (key === "__proto__" || key === "constructor") {
+                    throw new ValidationError(
+                        "Record keys cannot be __proto__ or constructor",
+                    );
+                }
                 const [s, writer] = child.validateAndMakeWriter(
                     (data as any)[key],
                     scratchPad,
