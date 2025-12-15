@@ -95,7 +95,13 @@ export async function deserialize<S extends Schema<any>>(
     if (payloadHasSchema === 1) {
         // Use reflection to read the schema.
         const { reflectByteReprToSchema } = await import("./reflection");
-        schema = (await reflectByteReprToSchema(readCtx)) as S;
+        const newSchema = (await reflectByteReprToSchema(readCtx)) as S;
+        if (!newSchema.isCompatibleWith(schema)) {
+            throw new Error(
+                "Incompatible schema received during deserialization",
+            );
+        }
+        schema = newSchema;
     }
 
     const disconnectHandlers = new Map<number, () => void>();
@@ -125,9 +131,7 @@ export async function deserialize<S extends Schema<any>>(
         };
     };
 
-    const result = (
-        await schema.readFromContext(readCtx, hijackReadContext, {})
-    )[0];
+    const result = await schema.readFromContext(readCtx, hijackReadContext, {});
     if (usages === 0) {
         // Abort now.
         abortController.abort();
@@ -155,5 +159,100 @@ export async function deserialize<S extends Schema<any>>(
         }
     })();
 
-    return result;
+    return result[0];
+}
+
+export class StaticReader extends ReadableStream<Uint8Array> {
+    pos = 0;
+
+    constructor(private data: Uint8Array) {
+        super({
+            pull: (controller) => {
+                if (this.pos >= this.data.length) {
+                    controller.close();
+                    return;
+                }
+                const chunkSize = 65536;
+                const end = Math.min(this.pos + chunkSize, this.data.length);
+                const chunk = this.data.slice(this.pos, end);
+                this.pos = end;
+                controller.enqueue(chunk);
+            },
+        });
+    }
+}
+
+/**
+ * Reads a static file. A static file will always start with its full schema.
+ *
+ * @template S - The schema type
+ * @param schema - Schema defining the expected data structure
+ * @param readerOrPayload - ReadableStream to read from, or a Uint8Array payload
+ * @returns Promise resolving to the deserialized data of type output<S>
+ *
+ * @example
+ * ```typescript
+ * const userSchema = object({
+ *   name: string(),
+ *   age: uint(),
+ *   active: boolean()
+ * });
+ *
+ * const response = await fetch('/path/to/static/file');
+ * const user = await readStaticFile(userSchema, response.body!);
+ *
+ * console.log(user); // { name: "John", age: 30, active: true }
+ * ```
+ */
+export async function readStaticFile<S extends Schema<any>>(
+    schema: S,
+    readerOrPayload: ReadableStream<Uint8Array> | Uint8Array,
+): Promise<output<S>> {
+    if (readerOrPayload instanceof Uint8Array) {
+        readerOrPayload = new StaticReader(readerOrPayload);
+    }
+
+    const readCtx = new ReadContext(readerOrPayload.getReader());
+    const { reflectByteReprToSchema } = await import("./reflection");
+    const theirSchema = (await reflectByteReprToSchema(readCtx)) as S;
+    if (!theirSchema.isCompatibleWith(schema)) {
+        throw new Error("Incompatible schema received during deserialization");
+    }
+
+    let usages = 0;
+    const handlers = new Map<number, (ctx: ReadContext) => Promise<void>>();
+    const hijackReadContext = (
+        id: number,
+        fn: (ctx: ReadContext) => Promise<void>,
+    ) => {
+        usages++;
+        handlers.set(id, fn);
+        let cleanedUp = false;
+        return (slurp: boolean) => {
+            if (cleanedUp) return;
+            cleanedUp = true;
+            if (!slurp) {
+                handlers.delete(id);
+            }
+            usages--;
+        };
+    };
+    const result = await theirSchema.readFromContext(
+        readCtx,
+        hijackReadContext,
+        {},
+    );
+
+    while (usages > 0) {
+        const idHigh = await readCtx.readByte();
+        const idLow = await readCtx.readByte();
+        const id = (idHigh << 8) | idLow;
+
+        const handler = handlers.get(id);
+        if (handler) {
+            await handler(readCtx);
+        }
+    }
+
+    return result[0];
 }

@@ -51,6 +51,11 @@ export async function reflectByteReprToSchema(
                 const fieldNameLength = await readRollingUintNoAlloc(ctx);
                 const fieldNameBytes = await ctx.readBytes(fieldNameLength);
                 const fieldName = td.decode(fieldNameBytes);
+                if (fieldName === "prototype" || fieldName === "__proto__") {
+                    throw new Error(
+                        "Reflected schema contains invalid field name",
+                    );
+                }
                 fields[fieldName] = await reflectByteReprToSchema(ctx);
             }
             return object(fields);

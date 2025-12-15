@@ -22,13 +22,17 @@ function base<T>(
         ) => (slurp: boolean) => void,
         scratchPad: { [key: symbol]: any },
     ) => Promise<[T]>,
+    isCompatibleWith: (other: Schema<any>) => boolean,
     schema: Uint8Array<ArrayBuffer>,
+    extraInfo?: any,
 ) {
     return {
         name,
         validateAndMakeWriter,
         readFromContext,
+        isCompatibleWith,
         schema,
+        _extraInfo: extraInfo,
     } as const;
 }
 
@@ -91,7 +95,9 @@ export function pipe<T>(from: Schema<T>, into: (data: T) => T): Schema<T> {
             return from.validateAndMakeWriter(data, scratchPad);
         },
         readFromContext: from.readFromContext,
+        isCompatibleWith: from.isCompatibleWith,
         schema: from.schema,
+        _extraInfo: undefined,
     } as const;
 }
 
@@ -200,7 +206,12 @@ export function array<T>(elements: Schema<T>, message?: string) {
             }
             return [res];
         },
+        (other) => {
+            if (other.name !== "array") return false;
+            return elements.isCompatibleWith(other._extraInfo);
+        },
         schema,
+        elements,
     );
 }
 
@@ -309,8 +320,34 @@ export function object<T extends ObjectSchemas>(schemas: T, message?: string) {
             }
             return [res as Resolved];
         },
+        (other) => {
+            if (other.name !== "object") return false;
+            const otherSchemas = other._extraInfo as ObjectSchemas;
+            for (const [key, schema] of Object.entries(otherSchemas)) {
+                const ourVersion = schemas[key];
+                if (ourVersion) {
+                    if (!ourVersion.isCompatibleWith(schema)) {
+                        // Schemas for this key are incompatible
+                        return false;
+                    }
+                } else {
+                    if (schema.name !== "optional") {
+                        // If it isn't optional, schemas are incompatible
+                        return false;
+                    }
+                }
+            }
+            return true;
+        },
         schema,
+        schemas,
     );
+}
+
+function rejectIfNotSameName(name: string) {
+    return (other: Schema<any>) => {
+        return other.name === name;
+    };
 }
 
 const td = new TextDecoder();
@@ -352,6 +389,7 @@ export function string(message?: string) {
 
             return [td.decode(bytes)];
         },
+        rejectIfNotSameName("string"),
         new Uint8Array([dataType.string]),
     );
 }
@@ -391,6 +429,7 @@ export function uint8array(message?: string) {
             const bytes = await ctx.readBytes(len);
             return [bytes];
         },
+        rejectIfNotSameName("uint8array"),
         new Uint8Array([dataType.u8array]),
     );
 }
@@ -430,6 +469,7 @@ export function buffer(message?: string) {
             const bytes = await ctx.readBytes(len);
             return [Buffer.from(bytes)];
         },
+        rejectIfNotSameName("buffer"),
         new Uint8Array([dataType.buffer]),
     );
 }
@@ -594,7 +634,12 @@ export function promise<T>(inner: Schema<T>, message?: string) {
             finalizer.register(promise, id);
             return [promise] as [Promise<T>];
         },
+        (other) => {
+            if (other.name !== "promise") return false;
+            return inner.isCompatibleWith(other._extraInfo);
+        },
         schema,
+        inner,
     );
 }
 
@@ -770,7 +815,12 @@ export function iterator<T>(elements: Schema<T>, message?: string) {
             finalizer.register(asyncIterable, id);
             return [asyncIterable] as [Iterable<T> | AsyncIterable<T>];
         },
+        (other) => {
+            if (other.name !== "iterator") return false;
+            return elements.isCompatibleWith(other._extraInfo);
+        },
         schema,
+        elements,
     );
 }
 
@@ -806,6 +856,7 @@ export function boolean(message?: string) {
             if (byte === 1) return [true];
             throw new Error("internal: Invalid boolean value");
         },
+        rejectIfNotSameName("boolean"),
         new Uint8Array([dataType.boolean]),
     );
 }
@@ -847,6 +898,7 @@ export function uint8(message?: string) {
             const byte = await ctx.readByte();
             return [byte];
         },
+        rejectIfNotSameName("uint8"),
         new Uint8Array([dataType.uint8]),
     );
 }
@@ -888,6 +940,7 @@ export function uint(message?: string) {
             const value = await readRollingUintNoAlloc(ctx);
             return [value];
         },
+        rejectIfNotSameName("uint"),
         new Uint8Array([dataType.uint]),
     );
 }
@@ -985,7 +1038,19 @@ export function union<
             );
             return value as any;
         },
+        (other) => {
+            if (other.name !== "union") return false;
+            const otherSchemas = other._extraInfo as Schema<any>[];
+            if (otherSchemas.length !== others.length) return false;
+            for (let i = 0; i < others.length; i++) {
+                if (!others[i].isCompatibleWith(otherSchemas[i])) {
+                    return false;
+                }
+            }
+            return true;
+        },
         schema,
+        others,
     );
 }
 
@@ -1030,6 +1095,7 @@ export function date(message?: string) {
             const timeStr = td.decode(bytes);
             return [new Date(timeStr)];
         },
+        rejectIfNotSameName("date"),
         new Uint8Array([dataType.date]),
     );
 }
@@ -1075,6 +1141,7 @@ export function int(message?: string) {
             const value = (zigzagged >>> 1) ^ -(zigzagged & 1);
             return [value];
         },
+        rejectIfNotSameName("int"),
         new Uint8Array([dataType.int]),
     );
 }
@@ -1120,6 +1187,7 @@ export function float(message?: string) {
             const value = view.getFloat64(0, true);
             return [value];
         },
+        rejectIfNotSameName("float"),
         new Uint8Array([dataType.float]),
     );
 }
@@ -1190,9 +1258,16 @@ export function nullable<T = null>(inner?: Schema<T>) {
             }
             throw new Error("internal: Invalid nullable flag");
         },
+        (other) => {
+            if (other.name !== "nullable") return false;
+            if (!inner && other._extraInfo) return false;
+            if (inner && !other._extraInfo) return false;
+            return inner ? inner.isCompatibleWith(other._extraInfo) : true;
+        },
         inner
             ? new Uint8Array([dataType.nullable, ...inner.schema])
             : new Uint8Array([dataType.nullable, 0x00]), // special case because we need to know if no schema
+        inner,
     );
 }
 
@@ -1252,7 +1327,12 @@ export function optional<T>(inner: Schema<T>) {
             }
             throw new Error("internal: Invalid optional flag");
         },
+        (other) => {
+            if (other.name !== "optional") return false;
+            return inner.isCompatibleWith(other._extraInfo);
+        },
         new Uint8Array([dataType.optional, ...inner.schema]),
+        inner,
     );
 }
 
@@ -1297,6 +1377,7 @@ export function bigint(message?: string) {
             const value = view.getBigUint64(0, true);
             return [value];
         },
+        rejectIfNotSameName("bigint"),
         new Uint8Array([dataType.bigint]),
     );
 }
@@ -1401,6 +1482,7 @@ export function readableStream(message?: string) {
             });
             return [stream];
         },
+        rejectIfNotSameName("readableStream"),
         new Uint8Array([dataType.readableStream]),
     );
 }
@@ -1499,7 +1581,12 @@ export function record<S extends Schema<any>>(
             }
             return [res];
         },
+        (other) => {
+            if (other.name !== "record") return false;
+            return child.isCompatibleWith(other._extraInfo);
+        },
         new Uint8Array([dataType.record, ...child.schema]),
+        child,
     );
 }
 
@@ -1581,11 +1668,23 @@ export function map<K, V>(
             }
             return [res];
         },
+        (other) => {
+            if (other.name !== "map") return false;
+            const [otherKeySchema, otherValueSchema] = other._extraInfo as [
+                Schema<any>,
+                Schema<any>,
+            ];
+            return (
+                keySchema.isCompatibleWith(otherKeySchema) &&
+                valueSchema.isCompatibleWith(otherValueSchema)
+            );
+        },
         new Uint8Array([
             dataType.map,
             ...keySchema.schema,
             ...valueSchema.schema,
         ]),
+        [keySchema, valueSchema],
     );
 }
 
@@ -1870,7 +1969,12 @@ export function compressionTable<T extends Schema<any>>(
             }
             return [entry as output<T>];
         },
+        (other) => {
+            if (other.name !== "compressionTable") return false;
+            return child.isCompatibleWith(other._extraInfo);
+        },
         new Uint8Array([dataType.compressionTable, ...child.schema]),
+        child,
     );
 }
 
@@ -1933,6 +2037,7 @@ export function potentiallyFloatString(message?: string) {
                 scratchPad,
             );
         },
+        rejectIfNotSameName("potentiallyFloatString"),
         new Uint8Array([dataType.potentiallyFloatString]),
     );
 }
@@ -2089,6 +2194,7 @@ export function any(message?: string) {
             const schema = await reflectByteReprToSchema(ctx);
             return schema.readFromContext(ctx, hijackReadContext, scratchPad);
         },
+        rejectIfNotSameName("any"),
         new Uint8Array([dataType.any]),
     );
 }
